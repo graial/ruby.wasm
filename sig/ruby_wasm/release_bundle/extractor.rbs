@@ -1,0 +1,47 @@
+module RubyWasm
+  module ReleaseBundle
+    class ExtractionError < StandardError
+      attr_reader source: String
+      attr_reader line_number: Integer
+      attr_reader column: Integer
+      attr_reader word: String?
+      attr_reader reason: String
+
+      def initialize: (String reason, source: String, line_number: Integer, column: Integer, ?word: String?) -> void
+    end
+
+    class Word
+      attr_reader text: String
+      attr_reader offset: Integer
+
+      def initialize: (String text, Integer offset) -> void
+    end
+
+    class Extractor
+      @source: String
+
+      QUOTES: Array[String]
+      BLANKS: Array[String]
+      SEPARATORS: Array[String]
+      SEPARATOR_PATTERN: Regexp
+      ANCHORS: Array[String]
+      OPTION_NAME: Regexp
+
+      def initialize: (?source: String) -> void
+
+      def self.extract_file: (String path) -> Array[String]
+
+      def extract: (String text) -> Array[String]
+
+      private
+
+      def split_words: (String line, Integer line_number) -> Array[Word]
+
+      def paths_in: (Word word, Integer line_number) -> Array[String]
+
+      def anchored?: (String text, Integer index) -> bool
+
+      def char_at: (String text, Integer index) -> String
+    end
+  end
+end

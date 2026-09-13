@@ -31,4 +31,5 @@ Gem::Specification.new do |spec|
   spec.extensions = ["ext/ruby_wasm/Cargo.toml"]
 
   spec.add_dependency "logger"
+  spec.add_dependency "open3"
 end

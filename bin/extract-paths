@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Writes the Path trace of one captured recipe to stdout, one path per line.
+#
+#   bin/extract-paths link.raw.txt > link.paths.txt
+#
+# Exit 0 with the trace on stdout. Exit 1 with nothing on stdout and the
+# position of the offending word on stderr. Exit 2 for a usage or I/O error.
+#
+# Nothing is printed until the whole file has been read without raising, per
+# section 5.6: the trace this writes is the one the coverage assertions consume,
+# and a partial trace must never reach them.
+
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+
+require "ruby_wasm/release_bundle/extractor"
+
+if ARGV.length != 1
+  warn "usage: #{File.basename($PROGRAM_NAME)} <recipe-file>"
+  exit 2
+end
+
+begin
+  trace = RubyWasm::ReleaseBundle::Extractor.extract_file(ARGV[0])
+rescue RubyWasm::ReleaseBundle::ExtractionError => e
+  warn e.message
+  exit 1
+rescue SystemCallError => e
+  warn "#{ARGV[0]}: #{e.message}"
+  exit 2
+end
+
+trace.each { |path| puts path }
