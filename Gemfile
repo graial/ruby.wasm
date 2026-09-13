@@ -17,3 +17,7 @@ group :check do
   gem "syntax_tree", "~> 3.5"
   gem "steep", "1.10.0" if RUBY_VERSION >= "3.1.0"
 end
+
+group :development, :test do
+  gem "rspec", "~> 3.13"
+end
