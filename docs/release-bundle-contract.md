@@ -134,6 +134,16 @@ tree root. That is why the archive appears twice and by symlink, and why the
 generated `ruby/config.h` does not appear at all. This governs mirroring only.
 It says nothing about which members ship.
 
+**2.5 A bundle tree is assembled once, into a directory that did not exist.**
+Assembling over an existing tree merges rather than replaces: a member from an
+earlier attempt survives, and 6.6 then passes, because `hashes.txt` is
+generated from whatever is present. That is 2.1's populated-by-exclusion
+hazard by a second route, and the set is again one nobody chose.
+
+A producer that finds the destination present stops, rather than reusing it or
+clearing it. Clearing is indistinguishable from a partial clear that failed
+halfway.
+
 ---
 
 ## 3. Members
@@ -489,16 +499,22 @@ path gets shed quietly.
 | --- | --- | --- |
 | link recipe | `-o ruby$` | `make -n ruby` |
 | `wasm-opt` line | `bin/wasm-opt ` | `make -n ruby` |
-| compile recipe | `-o main\.o ` | `make -n -B main.o` |
+| compile recipe | `-o main\.o ` | `make -n -W main.c main.o` |
 
 The link pattern is anchored because the `wasm-opt` line also contains
 `-o ruby`; unanchored it matches twice and stops a correct release. "Matches
 exactly once" is not a rule until the pattern is named.
 
-Zero or two matches stops the release. A warm tree emits neither `main.o` nor
-`ext/extinit.o`, so the compile capture forces the recipe. A selected recipe
-must be a single physical line; a backslash continuation stops the release
-rather than being joined.
+Zero or two matches stops the release. A warm tree emits no compile line for
+`main.o`, so the capture has to make it out of date: `-W main.c` asks what
+follows from `main.c` having just changed. `-B` also works and produces a
+byte-identical recipe, and is not used, because it forces every prerequisite
+recursively — six hundred lines of unrelated build activity for the pattern to
+be right about, where `-W` produces two. A rule that must match exactly once
+means more over a small transcript than a large one.
+
+A selected recipe must be a single physical line; a backslash continuation
+stops the release rather than being joined.
 
 Counting and capturing read one transcript, not two. `make -n` reads the tree
 as it stands, so a count taken from one invocation does not describe the line
@@ -525,6 +541,11 @@ Resolving a member reference reads `hashes.txt`, so that bullet alone is
 checked after assembly and 6.6, where the rest of 6.2 reads only the recipes
 and the manifest. Section 6's clauses are numbered, not ordered, and this is
 the one dependency among them.
+
+**Every assertion in this section reads the manifest as the bundle carries
+it.** A key set transcribed twice is two key sets, and the assertions will
+validate the copy that does not ship. 5.5 says the same thing about path
+traces, which is why traces have never had this failure.
 
 The first bullet is also what catches a Build-tree path appearing absolutely.
 `transcript_cwd` is not a key (4.6), so such a path starts with no declared
