@@ -17,6 +17,18 @@ module RubyWasm
       def initialize: (String text, Integer offset) -> void
     end
 
+    class ShedPath
+      attr_reader source: String
+      attr_reader line_number: Integer
+      attr_reader column: Integer
+      attr_reader word: String
+      attr_reader would_have_read: String
+
+      def initialize: (source: String, line_number: Integer, column: Integer, word: String, would_have_read: String) -> void
+
+      def at: () -> String
+    end
+
     class Extractor
       @source: String
 
@@ -31,13 +43,21 @@ module RubyWasm
 
       def self.extract_file: (String path) -> Array[String]
 
+      def self.shed_file: (String path) -> Array[ShedPath]
+
       def extract: (String text) -> Array[String]
+
+      def shed: (String text) -> Array[ShedPath]
 
       private
 
+      def walk: (String text) -> [Array[String], Array[ShedPath]]
+
       def split_words: (String line, Integer line_number) -> Array[Word]
 
-      def paths_in: (Word word, Integer line_number) -> Array[String]
+      def paths_in: (Word word, Integer line_number) -> [Array[String], Array[ShedPath]]
+
+      def terminator: (String text, Integer index) -> Integer
 
       def anchored?: (String text, Integer index) -> bool
 

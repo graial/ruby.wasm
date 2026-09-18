@@ -45,6 +45,35 @@ module RubyWasm
       end
     end
 
+    # One "/" the anchor rule declined, with the word it sat in and the value
+    # that would have been read had it been admitted.
+    #
+    # 5.3 calls the anchor set the weakest clause in the contract, and says why:
+    # everywhere else in section 5 being wrong is loud, because an
+    # unclassifiable word stops the release. Here it is quiet — a word carrying
+    # an absolute path the anchors do not admit yields no path, and nothing
+    # stops. A shed path is that silence made enumerable.
+    #
+    # The word is carried because a declined "/" is only judgeable in context:
+    # "/extinit.o" means one thing inside `ext/extinit.o` and another on its own.
+    class ShedPath
+      attr_reader :source, :line_number, :column, :word, :would_have_read
+
+      def initialize(source:, line_number:, column:, word:, would_have_read:)
+        @source = source
+        @line_number = line_number
+        @column = column
+        @word = word
+        @would_have_read = would_have_read
+      end
+
+      # The position in the same shape ExtractionError prints, so a shed entry
+      # and a refusal name a place the same way.
+      def at
+        "#{source}:#{line_number}:#{column}"
+      end
+    end
+
     class Extractor
       # A quote both anchors a path and terminates one.
       QUOTES = ['"', "'"].freeze
@@ -76,6 +105,10 @@ module RubyWasm
         new(source: path).extract(File.read(path))
       end
 
+      def self.shed_file(path)
+        new(source: path).shed(File.read(path))
+      end
+
       # Returns the Path trace: every embedded path in +text+, one entry per
       # occurrence, left to right within a line and lines in order. Not sorted,
       # not deduplicated — the order is the contract (5.5).
@@ -83,17 +116,57 @@ module RubyWasm
       # The whole text is walked before anything is returned, so a caller cannot
       # stream a trace that later turns out to be partial.
       def extract(text)
-        # @type var trace: Array[String]
-        trace = []
-        text.each_line.with_index(1) do |line, line_number|
-          split_words(line.chomp, line_number).each do |word|
-            trace.concat(paths_in(word, line_number))
-          end
-        end
-        trace
+        walk(text).first
+      end
+
+      # The shed paths of +text+: every "/" the anchor rule declined, one entry
+      # per occurrence, in the order walked.
+      #
+      # **A report, never an assertion, and never a Path trace.** 5.5 fixes what
+      # a trace is and 6.2 consumes it; this is a diagnostic a human reads.
+      # Deciding whether a declined "/" was really a path is a reading, and 5.3
+      # is explicit that the anchor set was derived from the shapes CRuby's
+      # recipes are known to carry rather than from a transcript. Code that
+      # failed on a non-empty shed list would be judging what the contract says
+      # a human must, and it would stop every correct capture, since
+      # `ext/extinit.o` sheds "/extinit.o" on every link recipe ever taken.
+      #
+      # It is also not a bundle member. 6.6 fixes the member set and asserts it
+      # in both directions, so a shed list written into a bundle tree would
+      # change what a v1 bundle is.
+      #
+      # It reports non-admission only. A path silently *truncated* at a quote is
+      # the other quiet failure in 5.3 and does not appear here; that one
+      # surfaces as a trace carrying more entries than the consumer's.
+      #
+      # It raises exactly where +extract+ raises, because both read one walk. A
+      # shed list taken from a recipe whose extraction failed would be a partial
+      # reading presented as a complete one, which is 5.6's objection to a
+      # partial trace arriving beside a warning.
+      def shed(text)
+        walk(text).last
       end
 
       private
+
+      # The one walk. +extract+ and +shed+ are two readings of it rather than
+      # two traversals, so they cannot disagree about which "/" was admitted.
+      # A second pass that recomputed the admitted spans would be a second
+      # reading of 5.3, which is what 5.6 ships one extractor to prevent.
+      def walk(text)
+        # @type var trace: Array[String]
+        trace = []
+        # @type var shed: Array[ShedPath]
+        shed = []
+        text.each_line.with_index(1) do |line, line_number|
+          split_words(line.chomp, line_number).each do |word|
+            admitted, declined = paths_in(word, line_number)
+            trace.concat(admitted)
+            shed.concat(declined)
+          end
+        end
+        [trace, shed]
+      end
 
       # A shell word is delimited by unquoted whitespace. Quote state here uses
       # *matching* quotes, because that is what decides whether a space splits a
@@ -152,16 +225,34 @@ module RubyWasm
         text = word.text
         # @type var found: Array[String]
         found = []
+        # @type var shed: Array[ShedPath]
+        shed = []
         index = 0
 
         while index < text.length
-          unless text[index] == "/" && anchored?(text, index)
+          unless text[index] == "/"
             index += 1
             next
           end
 
-          stop = index
-          stop += 1 while stop < text.length && !QUOTES.include?(char_at(text, stop))
+          unless anchored?(text, index)
+            shed << ShedPath.new(
+              source: @source,
+              line_number: line_number,
+              column: word.offset + index + 1,
+              word: text,
+              would_have_read: text[index...terminator(text, index)].to_s
+            )
+            # Advance one character, not to the terminator. A later "/" inside
+            # the same declined run can still be anchored — `foo/bar=/baz`
+            # sheds "/bar=/baz" and admits "/baz" — and skipping ahead would
+            # swallow the admitted one, which is a path shed by the shed list
+            # itself.
+            index += 1
+            next
+          end
+
+          stop = terminator(text, index)
           path = text[index...stop].to_s
 
           if path.match?(/[ \t]/)
@@ -196,7 +287,18 @@ module RubyWasm
           index = stop + 1
         end
 
-        found
+        [found, shed]
+      end
+
+      # Where a path beginning at +index+ ends: the next quote of either kind,
+      # or the end of the word. Stated once because an admitted path and a
+      # declined one have to be read to the same place — a shed entry reported
+      # against a different terminator than the extractor uses would describe a
+      # value the extractor would never have produced.
+      def terminator(text, index)
+        stop = index
+        stop += 1 while stop < text.length && !QUOTES.include?(char_at(text, stop))
+        stop
       end
 
       # Without this, the maximal "/"-initial substring of the relative word

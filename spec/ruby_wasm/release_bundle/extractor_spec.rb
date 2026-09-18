@@ -185,6 +185,76 @@ RSpec.describe RubyWasm::ReleaseBundle::Extractor do
     end
   end
 
+  describe "shed paths (5.3)" do
+    def shed(text)
+      extractor.shed(text)
+    end
+
+    it "sheds nothing from a word whose every path was admitted" do
+      expect(shed("-I/a/b /c/d\n")).to be_empty
+    end
+
+    it "sheds the declined slash of a relative word, with its context" do
+      # The shapes 5.3 names: ext/extinit.o is on every link recipe, and its
+      # maximal "/"-initial substring is /extinit.o.
+      entries = shed("ext/extinit.o\n")
+      expect(entries.map(&:would_have_read)).to eq(["/extinit.o"])
+      expect(entries.first.word).to eq("ext/extinit.o")
+    end
+
+    it "sheds each declined slash separately rather than summarising a run" do
+      # -I.ext/include/wasm32-wasi is 5.3's other named shape. The anchor rule
+      # decides per "/", so a list that reported only the outermost would be a
+      # summary a reader has to un-summarise before it can be checked.
+      expect(shed("-I.ext/include/wasm32-wasi\n").map(&:would_have_read)).to eq(
+        %w[/include/wasm32-wasi /wasm32-wasi]
+      )
+    end
+
+    it "does not shed the interior slashes of an admitted path" do
+      # Without this the list is dominated by the insides of paths that were
+      # read, which is noise rather than a reading of the anchor set.
+      expect(shed("/a/b/c/d\n")).to be_empty
+    end
+
+    it "keeps admitting a later anchored slash inside a declined run" do
+      # foo/bar=/baz sheds /bar=/baz and admits /baz. A shed walk that jumped to
+      # the terminator would swallow the admitted one — a path shed by the shed
+      # list itself.
+      expect(trace("foo/bar=/baz\n")).to eq(["/baz"])
+      expect(shed("foo/bar=/baz\n").map(&:would_have_read)).to eq(["/bar=/baz"])
+    end
+
+    it "reports the position in the same shape a refusal does" do
+      entry = shed("cc ext/extinit.o\n").first
+      expect(entry.at).to eq("recipe.txt:1:7")
+    end
+
+    it "raises exactly where extract raises" do
+      # A shed list from a recipe that does not extract would be a partial
+      # reading presented as a complete one.
+      expect { shed(%(-DFOO="/a b"\n)) }.to raise_error(
+        RubyWasm::ReleaseBundle::ExtractionError
+      )
+    end
+
+    it "leaves the trace untouched" do
+      text = "-I.ext/include/wasm32-wasi -I/a/b ext/extinit.o\n"
+      expect(trace(text)).to eq(["/a/b"])
+    end
+  end
+
+  describe ".shed_file" do
+    it "names the file in the position" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "link.raw.txt")
+        File.write(path, "ext/extinit.o\n")
+        expect(described_class.shed_file(path).first.source).to eq(path)
+      end
+    end
+  end
+
+
   describe ".extract_file" do
     it "names the file in the position" do
       Dir.mktmpdir do |dir|
@@ -213,7 +283,13 @@ RSpec.describe "bin/extract-paths" do
     # A truncated or library-only script runs, prints nothing and exits 0,
     # which is indistinguishable from four unrelated expectation failures.
     # Name it here instead.
-    body = path.read
+    # UTF-8 explicitly, not the platform default. Ruby source is UTF-8 whatever
+    # the locale says, but Pathname#read is not: under LANG=C the default
+    # external encoding is US-ASCII and this raises on the first em dash in a
+    # comment — turning a correct script into nine unrelated failures, which is
+    # the outcome this guard exists to prevent.
+    body = path.read(encoding: Encoding::UTF_8)
+
     if body.strip.empty?
       raise "empty: #{path}"
     elsif !body.include?("ARGV")
@@ -252,6 +328,44 @@ RSpec.describe "bin/extract-paths" do
       expect(code).to eq(1), "exited #{code}, stderr: #{stderr}"
       expect(stdout).to be_empty
       expect(stderr).to include("path contains whitespace")
+    end
+  end
+
+  it "writes the shed list in three tab-separated columns under --shed" do
+    with_recipe("ext/extinit.o -I/a/b\n") do |path|
+      stdout, stderr, code = run("--shed", path)
+      expect(code).to eq(0), "exited #{code}, stderr: #{stderr}"
+      expect(stdout).to eq("#{path}:1:4\t/extinit.o\text/extinit.o\n")
+    end
+  end
+
+  it "exits 0 under --shed even when the list is empty" do
+    # A status that varied with the list would be a verdict this program has no
+    # standing to give: 5.3 leaves judging a declined slash to a human.
+    with_recipe("-I/a/b\n") do |path|
+      stdout, stderr, code = run("--shed", path)
+      expect(code).to eq(0), "exited #{code}, stderr: #{stderr}"
+      expect(stdout).to be_empty
+    end
+  end
+
+  it "writes nothing to stdout and exits 1 when --shed cannot read" do
+    with_recipe(%(ext/extinit.o\n-DFOO="/a b"\n)) do |path|
+      stdout, stderr, code = run("--shed", path)
+      expect(code).to eq(1), "exited #{code}, stderr: #{stderr}"
+      expect(stdout).to be_empty
+      expect(stderr).to include("path contains whitespace")
+    end
+  end
+
+  it "does not emit a trace under --shed" do
+    # The two outputs must not be confusable: 6.2 consumes a trace and nothing
+    # consumes a shed list.
+    with_recipe("-I/a/b\n") do |path|
+      shed_out, = run("--shed", path)
+      trace_out, = run(path)
+      expect(trace_out).to eq("/a/b\n")
+      expect(shed_out).not_to include("/a/b\n")
     end
   end
 

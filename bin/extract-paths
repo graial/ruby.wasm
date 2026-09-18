@@ -5,6 +5,14 @@
 #
 #   bin/extract-paths link.raw.txt > link.paths.txt
 #
+# With --shed, writes the shed list instead: every "/" section 5.3's anchor
+# rule declined, tab-separated as position, value and word. That is a report a
+# human reads, not a Path trace and not a bundle member — write it somewhere
+# outside the bundle tree, since 6.6 fixes the member set and checks it in both
+# directions.
+#
+#   bin/extract-paths --shed link.raw.txt > ../link.shed.tsv
+#
 # Exit 0 with the trace on stdout. Exit 1 with nothing on stdout and the
 # position of the offending word on stderr. Exit 2 for a usage or I/O error.
 #
@@ -15,20 +23,41 @@
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 
 require "ruby_wasm/release_bundle/extractor"
+args = ARGV.dup
+shed_mode = args.delete("--shed")
 
-if ARGV.length != 1
-  warn "usage: #{File.basename($PROGRAM_NAME)} <recipe-file>"
+if args.length != 1
+  warn "usage: #{File.basename($PROGRAM_NAME)} [--shed] <recipe-file>"
+
   exit 2
 end
 
 begin
-  trace = RubyWasm::ReleaseBundle::Extractor.extract_file(ARGV[0])
+  if shed_mode
+    shed = RubyWasm::ReleaseBundle::Extractor.shed_file(args[0])
+  else
+    trace = RubyWasm::ReleaseBundle::Extractor.extract_file(args[0])
+  end
+
 rescue RubyWasm::ReleaseBundle::ExtractionError => e
   warn e.message
   exit 1
 rescue SystemCallError => e
-  warn "#{ARGV[0]}: #{e.message}"
+  warn "#{args[0]}: #{e.message}"
   exit 2
 end
 
-trace.each { |path| puts path }
+if shed_mode
+  # Three tab-separated columns, deliberately unlike the one-path-per-line
+  # trace. A shed list is not a Path trace (5.5) and nothing in section 6
+  # consumes one; a format a coverage assertion could swallow by mistake is a
+  # format that invites the mistake.
+  #
+  # Exit 0 whether or not the list is empty. A non-empty shed list is the
+  # expected state — `ext/extinit.o` sheds "/extinit.o" on every link recipe —
+  # so a status that varied with it would be a verdict this program has no
+  # standing to give.
+  shed.each { |entry| puts [entry.at, entry.would_have_read, entry.word].join("\t") }
+else
+  trace.each { |path| puts path }
+end
