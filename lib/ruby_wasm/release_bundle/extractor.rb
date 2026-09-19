@@ -45,8 +45,8 @@ module RubyWasm
       end
     end
 
-    # One "/" the anchor rule declined, with the word it sat in and the value
-    # that would have been read had it been admitted.
+    # One maximal run of declined `/`s, with the word it sat in and the value
+    # that would have been read had the first of them been admitted.
     #
     # 5.3 calls the anchor set the weakest clause in the contract, and says why:
     # everywhere else in section 5 being wrong is loud, because an
@@ -54,17 +54,29 @@ module RubyWasm
     # an absolute path the anchors do not admit yields no path, and nothing
     # stops. A shed path is that silence made enumerable.
     #
-    # The word is carried because a declined "/" is only judgeable in context:
+    # The unit is the maximal run rather than the individual `/`, because 5.3
+    # admits *maximal* `/`-initial substrings: a per-`/` list reports values
+    # that could never be admitted by any anchoring, and a reader cannot act on
+    # an entry describing a value the extractor would not produce.
+    # `-I.ext/include/wasm32-wasi` sheds `/include/wasm32-wasi` once, not that
+    # and `/wasm32-wasi` besides. +declined+ carries how many `/`s the run
+    # covers, so the entry states the number of decisions taken without the
+    # reader having to un-summarise it.
+    #
+    # The word is carried because a declined `/` is only judgeable in context:
     # "/extinit.o" means one thing inside `ext/extinit.o` and another on its own.
+
     class ShedPath
       attr_reader :source, :line_number, :column, :word, :would_have_read
+      attr_accessor :declined
 
-      def initialize(source:, line_number:, column:, word:, would_have_read:)
+      def initialize(source:, line_number:, column:, word:, would_have_read:, declined: 1)
         @source = source
         @line_number = line_number
         @column = column
         @word = word
         @would_have_read = would_have_read
+        @declined = declined
       end
 
       # The position in the same shape ExtractionError prints, so a shed entry
@@ -227,6 +239,10 @@ module RubyWasm
         found = []
         # @type var shed: Array[ShedPath]
         shed = []
+        # The declined run currently being reported, so a "/" inside it counts
+        # toward that entry instead of starting another.
+        run = nil
+
         index = 0
 
         while index < text.length
@@ -236,13 +252,22 @@ module RubyWasm
           end
 
           unless anchored?(text, index)
-            shed << ShedPath.new(
-              source: @source,
-              line_number: line_number,
-              column: word.offset + index + 1,
-              word: text,
-              would_have_read: text[index...terminator(text, index)].to_s
-            )
+            if run && run.cover?(index)
+              # Inside a run already reported. Count the decision, do not emit a
+              # second entry describing a non-maximal substring.
+              shed.last.declined += 1
+            else
+              stop = terminator(text, index)
+              run = (index...stop)
+              shed << ShedPath.new(
+                source: @source,
+                line_number: line_number,
+                column: word.offset + index + 1,
+                word: text,
+                would_have_read: text[index...stop].to_s
+              )
+            end
+
             # Advance one character, not to the terminator. A later "/" inside
             # the same declined run can still be anchored — `foo/bar=/baz`
             # sheds "/bar=/baz" and admits "/baz" — and skipping ahead would

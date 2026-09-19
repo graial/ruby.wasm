@@ -211,6 +211,17 @@ RSpec.describe RubyWasm::ReleaseBundle::Extractor do
       )
     end
 
+    it "reports a run of declined slashes once, with its count" do
+      # -I.ext/include/wasm32-wasi is 5.3's other named shape and carries two
+      # declined slashes. 5.3 admits *maximal* substrings, so /wasm32-wasi is a
+      # value no anchoring could ever produce and reporting it would describe a
+      # path the extractor cannot emit. The count keeps the entry from hiding
+      # that two decisions were taken.
+      entries = shed("-I.ext/include/wasm32-wasi\n")
+      expect(entries.map(&:would_have_read)).to eq(["/include/wasm32-wasi"])
+      expect(entries.first.declined).to eq(2)
+    end
+
     it "does not shed the interior slashes of an admitted path" do
       # Without this the list is dominated by the insides of paths that were
       # read, which is noise rather than a reading of the anchor set.
@@ -335,7 +346,7 @@ RSpec.describe "bin/extract-paths" do
     with_recipe("ext/extinit.o -I/a/b\n") do |path|
       stdout, stderr, code = run("--shed", path)
       expect(code).to eq(0), "exited #{code}, stderr: #{stderr}"
-      expect(stdout).to eq("#{path}:1:4\t/extinit.o\text/extinit.o\n")
+      expect(stdout).to eq("#{path}:1:4\t/extinit.o\t1\text/extinit.o\n")
     end
   end
 
@@ -368,6 +379,7 @@ RSpec.describe "bin/extract-paths" do
       expect(shed_out).not_to include("/a/b\n")
     end
   end
+
 
   it "exits 2 on a missing file" do
     stdout, stderr, code = run("/nonexistent/recipe.txt")

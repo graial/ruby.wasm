@@ -1,0 +1,44 @@
+module RubyWasm
+  module ReleaseBundle
+    class Preflight
+      TAG: Regexp
+
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      @tag: String
+      @build_name: String
+      @existing_tags: Array[String]
+      @asset_name: String?
+      @archive_members: Array[String]?
+      @recorded_sha256: String?
+      @actual_sha256: String?
+
+      def initialize: (
+        tag: String,
+        build_name: String,
+        existing_tags: Array[String],
+        ?asset_name: String?,
+        ?archive_members: Array[String]?,
+        ?recorded_sha256: String?,
+        ?actual_sha256: String?
+      ) -> void
+
+      def refusals: () -> Array[Refusal]
+
+      def pass?: () -> bool
+
+      def next_ordinal: (?MatchData? match) -> Integer
+
+      def self.asset_name_for: (String tag, ?MatchData? match) -> String
+
+      def self.stem_for: (String asset_name) -> String
+
+      private
+
+      def asset_refusals: (MatchData match) -> Array[Refusal]
+    end
+  end
+end

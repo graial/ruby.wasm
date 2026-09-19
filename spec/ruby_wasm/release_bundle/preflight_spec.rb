@@ -1,0 +1,123 @@
+# frozen_string_literal: true
+
+require "ruby_wasm/release_bundle/preflight"
+
+RSpec.describe RubyWasm::ReleaseBundle::Preflight do
+  BUILD = "3.3-wasm32-unknown-icp-minimal"
+  TAG = "#{BUILD}-20260911.1"
+  ASSET = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1.tar.gz"
+  STEM = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1"
+  DIGEST = "a" * 64
+
+  def preflight(**overrides)
+    described_class.new(
+      **{
+        tag: TAG,
+        build_name: BUILD,
+        existing_tags: [],
+        asset_name: ASSET,
+        archive_members: [STEM],
+        recorded_sha256: DIGEST,
+        actual_sha256: DIGEST
+      }.merge(overrides)
+    )
+  end
+
+  def clauses(**overrides)
+    preflight(**overrides).refusals.map(&:clause)
+  end
+
+  describe "a correct publication" do
+    it "passes against an empty registry" do
+      expect(preflight).to be_pass
+    end
+
+    it "passes when other tags exist but not this one" do
+      # The fork carried no tags at all when this was written, so the
+      # not-a-collision case is the one that would otherwise go untested until
+      # the day it stops being true.
+      expect(preflight(existing_tags: ["#{BUILD}-20260901.1", "other-20260911.1"])).to be_pass
+    end
+  end
+
+  describe "1.7 — tags are never moved or deleted" do
+    it "refuses a tag that already exists" do
+      expect(clauses(existing_tags: [TAG])).to include("1.7")
+    end
+
+    it "names the next free ordinal rather than applying it" do
+      p = preflight(existing_tags: [TAG, "#{BUILD}-20260911.2"])
+      expect(p.next_ordinal).to eq(3)
+      expect(p.refusals.first.message).to include("Next free ordinal for 20260911: 3")
+    end
+
+    it "finds a hole rather than the highest ordinal plus one" do
+      expect(preflight(existing_tags: [TAG, "#{BUILD}-20260911.3"]).next_ordinal).to eq(2)
+    end
+
+    it "ignores ordinals from other dates and other Builds" do
+      expect(
+        preflight(
+          existing_tags: ["#{BUILD}-20260910.9", "3.3-wasm32-unknown-wasip1-minimal-20260911.9"]
+        ).next_ordinal
+      ).to eq(1)
+    end
+  end
+
+  describe "1.3 — the ordinal is always present" do
+    it "refuses a tag with no ordinal" do
+      expect(clauses(tag: "#{BUILD}-20260911")).to eq(["1.3"])
+    end
+
+    it "refuses a tag with no date" do
+      expect(clauses(tag: "#{BUILD}.1")).to eq(["1.3"])
+    end
+
+    it "refuses a tag naming a different Build" do
+      expect(clauses(tag: "3.3-wasm32-unknown-wasip1-minimal-20260911.1")).to include("1.3")
+    end
+
+    it "refuses an asset name that does not follow the tag" do
+      expect(clauses(asset_name: "ruby-icp-minimal.tar.gz")).to include("1.3")
+    end
+
+    it "stops at the grammar rather than reporting consequences of it" do
+      # A malformed tag makes every later check meaningless, so only the first
+      # is reported: a refusal list whose entries are artefacts of an earlier
+      # entry is a list a reader has to triage.
+      expect(clauses(tag: "nonsense", existing_tags: ["nonsense"])).to eq(["1.3"])
+    end
+  end
+
+  describe "1.4 — the sibling digest" do
+    it "refuses a missing .sha256" do
+      expect(clauses(recorded_sha256: nil)).to eq(["1.4"])
+    end
+
+    it "refuses a digest that does not match the tarball" do
+      expect(clauses(actual_sha256: "b" * 64)).to eq(["1.4"])
+    end
+  end
+
+  describe "1.5 — one top-level directory named for the asset stem" do
+    it "refuses two top-level entries" do
+      expect(clauses(archive_members: [STEM, "README"])).to eq(["1.5"])
+    end
+    it "refuses a top-level directory named something else" do
+      expect(clauses(archive_members: ["ruby"])).to eq(["1.5"])
+    end
+
+    it "refuses an empty tarball" do
+      expect(clauses(archive_members: [])).to eq(["1.5"])
+    end
+  end
+
+  it "reports every independent refusal at once" do
+    # Independent failures are reported together so one publication attempt
+    # surfaces all of them, rather than one per attempt.
+    expect(
+      clauses(existing_tags: [TAG], recorded_sha256: nil, archive_members: ["ruby"])
+    ).to eq(%w[1.7 1.4 1.5])
+  end
+end
+ 
