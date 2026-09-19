@@ -10,6 +10,11 @@ module RubyWasm
     # from a spec — which matters more than usual, because a preflight that
     # cannot refuse is indistinguishable from one that found nothing wrong.
     #
+    # The Build name a tag is checked against comes from the bundle itself —
+    # the build_name in the tarball's own manifest.yml — and never from the tag.
+    # An expected value derived from the thing being checked is the thing being
+    # checked, and a comparison of a value with itself cannot fail.
+    #
     # It refuses and reports. It does not choose. 1.3 says the ordinal carries
     # uniqueness and nothing else, and that publish time is not when to decide
     # what — so a preflight that silently incremented past a collision would be
@@ -21,6 +26,10 @@ module RubyWasm
 
       Refusal = Struct.new(:clause, :message)
 
+      # build_name: manifest.yml's build_name, read from inside the tarball;
+      #   nil when it could not be read.
+      # today: the UTC calendar date the preflight runs, as YYYYMMDD. Passed in
+      #   rather than read from a clock, so the date refusal has a spec.
       # existing_tags: every tag name on the remote.
       # archive_members: the top-level entries inside the tarball (1.5).
       # recorded_sha256 / actual_sha256: the sibling file's content and the
@@ -28,6 +37,7 @@ module RubyWasm
       def initialize(
         tag:,
         build_name:,
+        today:,
         existing_tags:,
         asset_name: nil,
         archive_members: nil,
@@ -36,6 +46,7 @@ module RubyWasm
       )
         @tag = tag
         @build_name = build_name
+        @today = today
         @existing_tags = existing_tags
         @asset_name = asset_name
         @archive_members = archive_members
@@ -58,10 +69,26 @@ module RubyWasm
           return out
         end
 
-        if match[:build] != @build_name
+        if @build_name.nil?
           out << Refusal.new(
             "1.3",
-            "tag names Build #{match[:build].inspect}, expected #{@build_name.inspect}"
+            "no build_name could be read from the tarball's manifest.yml, so the " \
+            "tag's Build name has nothing to be checked against"
+          )
+        elsif match[:build] != @build_name
+          out << Refusal.new(
+            "1.3",
+            "tag names Build #{match[:build].inspect}, the bundle's manifest.yml " \
+            "says #{@build_name.inspect}"
+          )
+        end
+
+        if match[:date] != @today
+          out << Refusal.new(
+            "1.3",
+            "tag date #{match[:date]} is not today's UTC date #{@today}. The date " \
+            "is the day the release is created; a bundle packed under another " \
+            "date is assembled again, not renamed"
           )
         end
 
@@ -83,8 +110,11 @@ module RubyWasm
 
       # The lowest ordinal not taken for this Build on this date. Reported so an
       # operator can choose it, never applied.
+      #
+      # The namespace is the tag's own Build and date, which is what a
+      # collision is a collision in.
       def next_ordinal(match = TAG.match(@tag))
-        prefix = "#{@build_name}-#{match[:date]}."
+        prefix = "#{match[:build]}-#{match[:date]}."
         taken =
           @existing_tags.filter_map do |t|
             Integer(t.delete_prefix(prefix), exception: false) if t.start_with?(prefix)

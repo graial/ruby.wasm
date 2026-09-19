@@ -9,7 +9,8 @@ module RubyWasm
       end
 
       @tag: String
-      @build_name: String
+      @build_name: String?
+      @today: String
       @existing_tags: Array[String]
       @asset_name: String?
       @archive_members: Array[String]?
@@ -18,7 +19,8 @@ module RubyWasm
 
       def initialize: (
         tag: String,
-        build_name: String,
+        build_name: String?,
+        today: String,
         existing_tags: Array[String],
         ?asset_name: String?,
         ?archive_members: Array[String]?,

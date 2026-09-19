@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Captures the two Reference recipes from one Build tree (contract 6.0, 6.1,
+# 5.1), into a capture directory that did not exist.
+#
+#   bin/capture-recipes <build-tree> <checkout> <capture-dir>
+#
+# Exit 0 having written link.raw.txt and compile.raw.txt, or exit 1 and print
+# every STOP. Exit 2 when a fact could not be gathered at all.
+#
+# The decision lives in RubyWasm::ReleaseBundle::Capture and is pure. This file
+# gathers facts: three mtimes, the checkout's `git status`, and one `make -n`
+# transcript per recipe, each written to a file with its stderr before anything
+# reads it. Counting and selecting then read that one saved transcript.
+#
+# The capture directory must not exist. A directory reused from an earlier
+# attempt keeps whatever that attempt left there — a path trace from another
+# capture, say — and nothing downstream can tell it apart from this one's.
+
+require "fileutils"
+require "open3"
+require_relative "../lib/ruby_wasm/release_bundle/capture"
+
+Capture = RubyWasm::ReleaseBundle::Capture
+
+tree, checkout, cap = ARGV
+if tree.nil? || checkout.nil? || cap.nil?
+  warn "usage: #{File.basename($PROGRAM_NAME)} <build-tree> <checkout> <capture-dir>"
+  exit 2
+end
+
+def stop_all(refusals)
+  refusals.each { |r| warn "STOP #{r.clause}  #{r.message}" }
+  exit 1
+end
+
+def git(checkout, *args)
+  out, err, status = Open3.capture3("git", "-C", checkout, *args)
+  unless status.success?
+    warn "git #{args.join(" ")} in #{checkout} failed: #{err.strip}"
+    exit 2
+  end
+  out
+end
+
+if File.exist?(cap)
+  warn "STOP 2.5  #{cap} already exists; capture into a directory that does not"
+  exit 1
+end
+
+mtime = ->(rel) do
+  path = File.join(tree, rel)
+  File.file?(path) ? File.mtime(path) : nil
+end
+
+changes = git(checkout, "status", "--porcelain", "--untracked-files=no").lines.map(&:chomp)
+head = git(checkout, "rev-parse", "HEAD").strip
+
+puts "build tree   : #{File.expand_path(tree)}"
+puts "checkout     : #{File.expand_path(checkout)}"
+puts "fork_commit  : #{head}"
+puts "tracked mods : #{changes.length}"
+
+pre =
+  Capture.preconditions(
+    tree_exists: File.directory?(tree),
+    ruby_mtime: mtime.call("ruby"),
+    main_o_mtime: mtime.call("main.o"),
+    extinit_o_mtime: mtime.call("ext/extinit.o"),
+    checkout_changes: changes
+  )
+stop_all(pre) unless pre.empty?
+
+FileUtils.mkdir_p(cap)
+
+# One invocation per recipe, stdout and stderr each to a file. The transcript
+# is then read back from the file, so what is selected is what was saved.
+# stderr is kept rather than discarded: a file2lastrev.rb notice about the tree
+# not being under a vcs is expected, and anything else is worth reading.
+def transcript(tree, cap, name, *cmd)
+  out, err, status = Open3.capture3(*cmd, chdir: tree, binmode: true)
+  File.binwrite(File.join(cap, "#{name}.out"), out)
+  File.binwrite(File.join(cap, "#{name}.err"), err)
+  puts format("%-26s -> %d lines, stderr %d lines, exit %s",
+              cmd.join(" "), out.lines.count, err.lines.count, status.exitstatus.inspect)
+  unless status.success?
+    # 6.7: a transcript from a failed make is not a transcript of the tree.
+    warn "STOP 6.1  `#{cmd.join(" ")}` exited #{status.exitstatus.inspect}; see #{name}.err"
+    exit 1
+  end
+  File.binread(File.join(cap, "#{name}.out"))
+end
+
+ruby_transcript = transcript(tree, cap, "make-n-ruby", "make", "-n", "ruby")
+main_transcript = transcript(tree, cap, "make-n-main", "make", "-n", "-W", "main.c", "main.o")
+
+selection = Capture.select(ruby_transcript: ruby_transcript, main_transcript: main_transcript)
+stop_all(selection.refusals) unless selection.refusals.empty?
+
+File.binwrite(File.join(cap, "link.raw.txt"), selection.link_raw.to_s)
+File.binwrite(File.join(cap, "compile.raw.txt"), selection.compile_raw.to_s)
+
+selection.notes.each { |note| puts "note         : #{note}" }
+puts "link.raw.txt    : #{selection.link_raw.to_s.lines.count} lines"
+puts "compile.raw.txt : #{selection.compile_raw.to_s.lines.count} lines"
+puts "OK  #{File.expand_path(cap)}"

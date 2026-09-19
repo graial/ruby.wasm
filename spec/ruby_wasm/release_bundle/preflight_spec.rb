@@ -14,6 +14,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
       **{
         tag: TAG,
         build_name: BUILD,
+        today: "20260911",
         existing_tags: [],
         asset_name: ASSET,
         archive_members: [STEM],
@@ -86,6 +87,38 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
       # is reported: a refusal list whose entries are artefacts of an earlier
       # entry is a list a reader has to triage.
       expect(clauses(tag: "nonsense", existing_tags: ["nonsense"])).to eq(["1.3"])
+    end
+  end
+
+  describe "1.3 — the tag's Build name is checked against the bundle's" do
+    # bin/preflight-release once passed the tag's own Build name as the expected
+    # one, so this refusal was reachable here and nowhere else. The expected
+    # name now comes from manifest.yml inside the tarball.
+    it "refuses a bundle whose manifest names a different Build" do
+      expect(clauses(build_name: "3.3-wasm32-unknown-wasip1-minimal")).to eq(["1.3"])
+    end
+
+    it "refuses when no build_name could be read, rather than skipping the check" do
+      expect(clauses(build_name: nil)).to eq(["1.3"])
+    end
+
+    it "counts ordinals in the tag's Build, whatever the manifest says" do
+      p = preflight(build_name: "other", existing_tags: [TAG])
+      expect(p.next_ordinal).to eq(2)
+    end
+  end
+
+  describe "1.3 — the date is today's UTC date" do
+    it "refuses yesterday's date, which is a bundle packed and not published in time" do
+      expect(clauses(today: "20260912")).to eq(["1.3"])
+    end
+
+    it "refuses a date that is not a calendar date, since it cannot be today" do
+      expect(clauses(tag: "#{BUILD}-20260231.1", today: "20260911")).to include("1.3")
+    end
+
+    it "reports the date alongside independent refusals" do
+      expect(clauses(today: "20260912", existing_tags: [TAG])).to eq(%w[1.3 1.7])
     end
   end
 

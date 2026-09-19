@@ -8,10 +8,12 @@ interprets them.** Every field in a bundle is something the Build machine
 observed. Nothing in it is a claim about the machine that downloads it, and
 nothing in it is rewritten to suit one.
 
-**Version 1.** Numbering restarts here. Four earlier drafts carried the
-numbers v1 through v4; no bundle was ever cut under any of them and no
-consumer ever implemented one. A version means something once an artifact
-declares it, and until then it is a heading. Every bundle states the version
+**Version 2.** Numbering restarted at v1: four earlier drafts carried the
+numbers v1 through v4, and no bundle was ever cut under any of them. v1 was
+frozen with a consumer fixture keyed to it and no bundle cut under it, and is
+superseded by this version; what changed, and why, is at the end of this
+document. A version means something once an artifact declares it, and until
+then it is a heading. Every bundle states the version
 it was cut under in `manifest.contract_version` (4.9), and edits to this
 document arrive in batches, so that each version costs a consumer one fixture
 rather than one per edit.
@@ -35,8 +37,14 @@ nothing.
 3.3-wasm32-unknown-icp-minimal-20260911.1
 ```
 
-Asset: `ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1.tar.gz`. The
-ordinal carries uniqueness and nothing else; a suffix that exists only
+Asset: `ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1.tar.gz`.
+
+The date is the UTC calendar date on which the release is created. The tag
+names a publication, and GitHub records a release's `created_at` in UTC, so
+the date can be checked against the registry by anyone; a Build or capture
+date could only be taken on the fork's word.
+
+The ordinal carries uniqueness and nothing else; a suffix that exists only
 sometimes is a suffix whose absence means something, and publish time is not
 when to decide what.
 
@@ -180,7 +188,7 @@ objects outside the prefix that it does not hold.
 ## 4. Build Manifest — `manifest.yml`
 
 ```yaml
-contract_version: 1
+contract_version: 2
 build_name: 3.3-wasm32-unknown-icp-minimal
 fork_commit: <40-hex>
 capture: manual                  # or: workflow
@@ -573,9 +581,17 @@ a mismatch against a reference with nothing to fill it. A consumer's own check
 would see the symptom; this sees the cause. The producer can check one line.
 
 **6.5 The captures and the shipped prefix describe the same Build.** The four
-`_WASI_EMULATED_*` defines, the three `WASM_*_STACK_BUFFER_SIZE` values and
-the wasi-sdk path in `compile.raw.txt` agree with `configure_args` in the
-shipped `rbconfig.rb`.
+`_WASI_EMULATED_*` defines in `compile.raw.txt` each appear in both
+`CONFIG["CPPFLAGS"]` and `CONFIG["CFLAGS"]` of the shipped `rbconfig.rb`. The
+three `WASM_*_STACK_BUFFER_SIZE` values and the wasi-sdk path each appear in
+`CONFIG["configure_args"]`.
+
+Each value is checked in the key that carries it. CRuby's `configure.ac`
+appends the four defines to `CFLAGS` and `CPPFLAGS` itself, so they never pass
+through the arguments configure was given; the compile recipe carries each
+define twice, once from each key. The keys are named as top-level `CONFIG`
+entries because `configure_args` also contains a `CFLAGS=` token, which is a
+different value.
 
 `make -n` reads the tree as it stands now, while the prefix was produced
 earlier. A bundle whose recipes describe a configuration the archive did not
@@ -657,3 +673,25 @@ either way (5.6).
 **7.11 A bundle declares the contract version it was cut under** — 4.9. A
 consumer implementing more than one version should say which it implements; a
 consumer implementing one should refuse the rest rather than guess.
+
+---
+
+## Changes from v1
+
+v1 was frozen at `release` commit `d9ce5e7` and no bundle was cut under it.
+This version makes two edits and no others.
+
+**6.5 names the keys that carry each value.** v1 required the four
+`_WASI_EMULATED_*` defines to agree with `configure_args`. They are never
+there: `configure.ac` appends them to `CFLAGS` and `CPPFLAGS` directly
+(`RUBY_APPEND_OPTIONS`), so the clause could not pass on any Build. The first
+icp capture stopped on it, with the stack sizes and the wasi-sdk path
+agreeing and all four defines absent. v1 also said "agree with", which a reader
+could take as "do not contradict" and pass vacuously; v2 says "appear in".
+
+**1.3 states whose date the tag carries.** v1 said "date" and did not say
+whether it was the Build's, the capture's or the publication's. It is the UTC
+calendar date on which the release is created.
+
+Nothing in section 5 changed. A path trace extracted under v1 is the trace
+v2 extracts from the same recipe.

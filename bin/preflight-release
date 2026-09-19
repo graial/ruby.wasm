@@ -5,13 +5,14 @@
 # uploaded.
 #
 #   bin/preflight-release <tag> <asset-directory> [remote]
-#   bin/preflight-release 3.3-wasm32-unknown-icp-minimal-20260911.1 ./out
+#   bin/preflight-release 3.3-wasm32-unknown-icp-minimal-20260919.1 ./out
 #
 # Exit 0 and print the publish command, or exit 1 and print every refusal.
 #
 # The decision lives in RubyWasm::ReleaseBundle::Preflight and is pure. This
 # file only gathers facts: the remote's tags, the sibling digest, the tarball's
-# top level. Keeping those apart is what lets every refusal be reached from a
+# top level, the build_name in the tarball's own manifest.yml, and today's UTC
+# date. Keeping those apart is what lets every refusal be reached from a
 # spec without a network, and a preflight whose refusals are untested is a
 # preflight nobody has seen refuse anything.
 #
@@ -20,6 +21,7 @@
 
 require "digest"
 require "open3"
+require "yaml"
 require_relative "../lib/ruby_wasm/release_bundle/preflight"
 
 Preflight = RubyWasm::ReleaseBundle::Preflight
@@ -59,6 +61,7 @@ asset_path = asset_name && File.join(dir, asset_name)
 archive_members = nil
 actual_sha256 = nil
 recorded_sha256 = nil
+build_name = nil
 
 if asset_path && File.exist?(asset_path)
   actual_sha256 = Digest::SHA256.file(asset_path).hexdigest
@@ -72,15 +75,30 @@ if asset_path && File.exist?(asset_path)
       .map { |entry| entry.strip.split("/").first }
       .compact
       .uniq
+
+  # The Build name the tag is checked against is the bundle's own. A tarball
+  # with no readable <stem>/manifest.yml leaves it nil, which is a refusal.
+  manifest_member = "#{Preflight.stem_for(asset_name.to_s)}/manifest.yml"
+  manifest_yaml, _err, status = Open3.capture3("tar", "xzOf", asset_path, manifest_member)
+  if status.success?
+    parsed = YAML.safe_load(manifest_yaml)
+    candidate = parsed.is_a?(Hash) ? parsed["build_name"] : nil
+    build_name = candidate if candidate.is_a?(String)
+  end
 elsif asset_name
   warn "REFUSE 1.3  no #{asset_name} in #{dir}"
   exit 1
 end
 
+# ADR-0042: the tag's date is the UTC calendar date the release is created.
+now = Time.now.utc
+today = now.strftime("%Y%m%d")
+
 preflight =
   Preflight.new(
     tag: tag,
-    build_name: match ? match[:build] : tag,
+    build_name: build_name,
+    today: today,
     existing_tags: existing_tags,
     asset_name: asset_name,
     archive_members: archive_members,
@@ -98,6 +116,8 @@ end
 puts "OK  #{tag}"
 puts "    #{existing_tags.length} tag(s) on #{remote}, none of them this one"
 puts "    #{asset_name}  sha256 #{actual_sha256}"
+puts "    build_name #{build_name} (from #{Preflight.stem_for(asset_name.to_s)}/manifest.yml)"
+puts "    date #{today} is today in UTC (checked #{now.strftime("%H:%M")} UTC; publish before 24:00 UTC)"
 puts
 puts "Publish with (1.2 ordinary release, never a pre-release; 1.6 latest):"
 puts <<~CMD

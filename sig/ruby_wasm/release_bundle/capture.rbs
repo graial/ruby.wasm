@@ -1,0 +1,46 @@
+module RubyWasm
+  module ReleaseBundle
+    class Capture
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      class Selection < Struct[untyped]
+        attr_accessor link_raw: String?
+        attr_accessor compile_raw: String?
+        attr_accessor refusals: Array[Refusal]
+        attr_accessor notes: Array[String]
+      end
+
+      LINK: Regexp
+      WASM_OPT: Regexp
+      COMPILE: Regexp
+
+      def self.preconditions: (
+        tree_exists: bool,
+        ruby_mtime: Time?,
+        main_o_mtime: Time?,
+        extinit_o_mtime: Time?,
+        checkout_changes: Array[String]
+      ) -> Array[Refusal]
+
+      def self.select: (
+        ruby_transcript: String,
+        main_transcript: String
+      ) -> Selection
+
+      private
+
+      def self.physical_lines: (String text) -> Array[String]
+
+      def self.pick: (
+        Array[String] lines,
+        Regexp pattern,
+        String label,
+        String source,
+        Array[Refusal] refusals
+      ) -> [Integer, String]?
+    end
+  end
+end
