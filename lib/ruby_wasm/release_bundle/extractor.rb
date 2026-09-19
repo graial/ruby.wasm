@@ -240,6 +240,7 @@ module RubyWasm
         shed = []
         # The declined run currently being reported, so a "/" inside it counts
         # toward that entry instead of starting another.
+        # @type var run: Range[Integer]?
         run = nil
         index = 0
 

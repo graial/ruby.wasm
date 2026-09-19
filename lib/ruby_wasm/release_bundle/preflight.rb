@@ -114,16 +114,22 @@ module RubyWasm
       # The namespace is the tag's own Build and date, which is what a
       # collision is a collision in.
       def next_ordinal(match = TAG.match(@tag))
+        raise ArgumentError, "#{@tag.inspect} is not a tag, so it has no ordinals" if match.nil?
+
         prefix = "#{match[:build]}-#{match[:date]}."
         taken =
           @existing_tags.filter_map do |t|
             Integer(t.delete_prefix(prefix), exception: false) if t.start_with?(prefix)
           end
-        (1..).find { |n| !taken.include?(n) }
+        n = 1
+        n += 1 while taken.include?(n)
+        n
       end
 
       # 1.3's asset name, 1.4's sibling, 1.5's single top-level directory.
       def self.asset_name_for(tag, match = TAG.match(tag))
+        raise ArgumentError, "#{tag.inspect} is not a tag, so it names no asset" if match.nil?
+
         "ruby-#{match[:build]}-lib-#{match[:date]}.#{match[:ordinal]}.tar.gz"
       end
 
@@ -136,29 +142,31 @@ module RubyWasm
       def asset_refusals(match)
         # @type var out: Array[Refusal]
         out = []
-        return out if @asset_name.nil?
+        # A local, because a nil check on an instance variable does not narrow it.
+        asset_name = @asset_name
+        return out if asset_name.nil?
 
         expected = self.class.asset_name_for(@tag, match)
-        if @asset_name != expected
-          out << Refusal.new("1.3", "asset is #{@asset_name}, expected #{expected}")
+        if asset_name != expected
+          out << Refusal.new("1.3", "asset is #{asset_name}, expected #{expected}")
           return out
         end
 
         if @recorded_sha256.nil?
           out << Refusal.new(
             "1.4",
-            "no #{@asset_name}.sha256 sibling; a download that cannot be " \
+            "no #{asset_name}.sha256 sibling; a download that cannot be " \
             "checked is a download that is described"
           )
         elsif @actual_sha256 && @recorded_sha256 != @actual_sha256
           out << Refusal.new(
             "1.4",
-            "#{@asset_name}.sha256 records #{@recorded_sha256}, tarball is #{@actual_sha256}"
+            "#{asset_name}.sha256 records #{@recorded_sha256}, tarball is #{@actual_sha256}"
           )
         end
 
         unless @archive_members.nil?
-          stem = self.class.stem_for(@asset_name)
+          stem = self.class.stem_for(asset_name)
           if @archive_members != [stem]
             out << Refusal.new(
               "1.5",
