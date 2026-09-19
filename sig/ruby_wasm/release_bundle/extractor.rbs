@@ -25,7 +25,7 @@ module RubyWasm
       attr_reader would_have_read: String
       attr_accessor declined: Integer
 
-      def initialize: (source: String, line_number: Integer, column: Integer, word: String, would_have_read: String) -> void
+      def initialize: (source: String, line_number: Integer, column: Integer, word: String, would_have_read: String, ?declined: Integer) -> void
 
       def at: () -> String
     end

@@ -88,7 +88,7 @@ module RubyWasm
         taken =
           @existing_tags.filter_map do |t|
             Integer(t.delete_prefix(prefix), exception: false) if t.start_with?(prefix)
-        end
+          end
         (1..).find { |n| !taken.include?(n) }
       end
 
@@ -118,7 +118,7 @@ module RubyWasm
           out << Refusal.new(
             "1.4",
             "no #{@asset_name}.sha256 sibling; a download that cannot be " \
-          "checked is a download that is described"
+            "checked is a download that is described"
           )
         elsif @actual_sha256 && @recorded_sha256 != @actual_sha256
           out << Refusal.new(

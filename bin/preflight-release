@@ -1,0 +1,110 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Refuses a publication that contract section 1 forbids, before anything is
+# uploaded.
+#
+#   bin/preflight-release <tag> <asset-directory> [remote]
+#   bin/preflight-release 3.3-wasm32-unknown-icp-minimal-20260911.1 ./out
+#
+# Exit 0 and print the publish command, or exit 1 and print every refusal.
+#
+# The decision lives in RubyWasm::ReleaseBundle::Preflight and is pure. This
+# file only gathers facts: the remote's tags, the sibling digest, the tarball's
+# top level. Keeping those apart is what lets every refusal be reached from a
+# spec without a network, and a preflight whose refusals are untested is a
+# preflight nobody has seen refuse anything.
+#
+# It reports the next free ordinal. It never picks one. 1.3 puts uniqueness in
+# the ordinal and says publish time is not when to decide what.
+
+require "digest"
+require "open3"
+require_relative "../lib/ruby_wasm/release_bundle/preflight"
+
+Preflight = RubyWasm::ReleaseBundle::Preflight
+
+tag = ARGV[0]
+dir = ARGV[1]
+remote = ARGV[2] || "origin"
+
+if tag.nil? || dir.nil?
+  warn "usage: #{File.basename($PROGRAM_NAME)} <tag> <asset-directory> [remote]"
+  exit 2
+end
+
+def run(*cmd)
+  out, err, status = Open3.capture3(*cmd)
+  unless status.success?
+    warn "#{cmd.first} failed: #{err.strip}"
+    exit 2
+  end
+  out
+end
+
+# Every tag on the remote, not every release. A tag can exist without a release
+# and `gh release create` would fail on it; asking git asks the thing that
+# actually has to be free.
+existing_tags =
+  run("git", "ls-remote", "--tags", remote)
+    .lines
+    .filter_map { |line| line.split("\t").last&.strip }
+    .map { |ref| ref.delete_prefix("refs/tags/").delete_suffix("^{}") }
+    .uniq
+
+match = Preflight::TAG.match(tag)
+asset_name = match && Preflight.asset_name_for(tag, match)
+asset_path = asset_name && File.join(dir, asset_name)
+
+archive_members = nil
+actual_sha256 = nil
+recorded_sha256 = nil
+
+if asset_path && File.exist?(asset_path)
+  actual_sha256 = Digest::SHA256.file(asset_path).hexdigest
+  sibling = "#{asset_path}.sha256"
+  # The sibling may be bare or in sha256sum's "<digest>  <name>" form; take the
+  # first field either way.
+  recorded_sha256 = File.read(sibling).split.first if File.exist?(sibling)
+  archive_members =
+    run("tar", "tzf", asset_path)
+      .lines
+      .map { |entry| entry.strip.split("/").first }
+      .compact
+      .uniq
+elsif asset_name
+  warn "REFUSE 1.3  no #{asset_name} in #{dir}"
+  exit 1
+end
+
+preflight =
+  Preflight.new(
+    tag: tag,
+    build_name: match ? match[:build] : tag,
+    existing_tags: existing_tags,
+    asset_name: asset_name,
+    archive_members: archive_members,
+    recorded_sha256: recorded_sha256,
+    actual_sha256: actual_sha256
+  )
+
+refusals = preflight.refusals
+
+unless refusals.empty?
+  refusals.each { |r| warn "REFUSE #{r.clause}  #{r.message}" }
+  exit 1
+end
+
+puts "OK  #{tag}"
+puts "    #{existing_tags.length} tag(s) on #{remote}, none of them this one"
+puts "    #{asset_name}  sha256 #{actual_sha256}"
+puts
+puts "Publish with (1.2 ordinary release, never a pre-release; 1.6 latest):"
+puts <<~CMD
+  gh release create #{tag} \\
+    #{File.join(dir, asset_name.to_s)} \\
+    #{File.join(dir, "#{asset_name}.sha256")} \\
+    --target release \\
+    --latest \\
+    --title #{tag}
+CMD

@@ -65,7 +65,6 @@ module RubyWasm
     #
     # The word is carried because a declined `/` is only judgeable in context:
     # "/extinit.o" means one thing inside `ext/extinit.o` and another on its own.
-
     class ShedPath
       attr_reader :source, :line_number, :column, :word, :would_have_read
       attr_accessor :declined
@@ -242,7 +241,6 @@ module RubyWasm
         # The declined run currently being reported, so a "/" inside it counts
         # toward that entry instead of starting another.
         run = nil
-
         index = 0
 
         while index < text.length
@@ -267,7 +265,6 @@ module RubyWasm
                 would_have_read: text[index...stop].to_s
               )
             end
-
             # Advance one character, not to the terminator. A later "/" inside
             # the same declined run can still be anchored — `foo/bar=/baz`
             # sheds "/bar=/baz" and admits "/baz" — and skipping ahead would

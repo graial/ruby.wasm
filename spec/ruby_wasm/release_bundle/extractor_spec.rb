@@ -202,15 +202,6 @@ RSpec.describe RubyWasm::ReleaseBundle::Extractor do
       expect(entries.first.word).to eq("ext/extinit.o")
     end
 
-    it "sheds each declined slash separately rather than summarising a run" do
-      # -I.ext/include/wasm32-wasi is 5.3's other named shape. The anchor rule
-      # decides per "/", so a list that reported only the outermost would be a
-      # summary a reader has to un-summarise before it can be checked.
-      expect(shed("-I.ext/include/wasm32-wasi\n").map(&:would_have_read)).to eq(
-        %w[/include/wasm32-wasi /wasm32-wasi]
-      )
-    end
-
     it "reports a run of declined slashes once, with its count" do
       # -I.ext/include/wasm32-wasi is 5.3's other named shape and carries two
       # declined slashes. 5.3 admits *maximal* substrings, so /wasm32-wasi is a
@@ -233,7 +224,9 @@ RSpec.describe RubyWasm::ReleaseBundle::Extractor do
       # the terminator would swallow the admitted one — a path shed by the shed
       # list itself.
       expect(trace("foo/bar=/baz\n")).to eq(["/baz"])
-      expect(shed("foo/bar=/baz\n").map(&:would_have_read)).to eq(["/bar=/baz"])
+      entries = shed("foo/bar=/baz\n")
+      expect(entries.map(&:would_have_read)).to eq(["/bar=/baz"])
+      expect(entries.first.declined).to eq(1)
     end
 
     it "reports the position in the same shape a refusal does" do
@@ -264,7 +257,6 @@ RSpec.describe RubyWasm::ReleaseBundle::Extractor do
       end
     end
   end
-
 
   describe ".extract_file" do
     it "names the file in the position" do
@@ -300,7 +292,6 @@ RSpec.describe "bin/extract-paths" do
     # comment — turning a correct script into nine unrelated failures, which is
     # the outcome this guard exists to prevent.
     body = path.read(encoding: Encoding::UTF_8)
-
     if body.strip.empty?
       raise "empty: #{path}"
     elsif !body.include?("ARGV")
@@ -379,7 +370,6 @@ RSpec.describe "bin/extract-paths" do
       expect(shed_out).not_to include("/a/b\n")
     end
   end
-
 
   it "exits 2 on a missing file" do
     stdout, stderr, code = run("/nonexistent/recipe.txt")

@@ -103,6 +103,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
     it "refuses two top-level entries" do
       expect(clauses(archive_members: [STEM, "README"])).to eq(["1.5"])
     end
+
     it "refuses a top-level directory named something else" do
       expect(clauses(archive_members: ["ruby"])).to eq(["1.5"])
     end
@@ -120,4 +121,3 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
     ).to eq(%w[1.7 1.4 1.5])
   end
 end
- 
