@@ -1,0 +1,62 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Clause 6.5: the captures and the shipped prefix describe the same Build.
+#
+#   bin/check-config-agreement <unpacked-bundle-directory>
+#   bin/check-config-agreement <compile.raw.txt> <rbconfig.rb>
+#
+# The first form re-checks any published bundle: compile.raw.txt at its top
+# level, and the one rbconfig.rb under prefix/lib/ruby/*/*/. The second form
+# checks a capture that has not been bundled, such as the full evidence
+# capture (ADR-0049), against the rbconfig.rb its Build installed.
+#
+# Exit 0: every value found in the key that carries it, each one printed.
+# Exit 1: refusals. Exit 2: the files could not be found; that is not a pass.
+#
+# The decision lives in RubyWasm::ReleaseBundle::ConfigAgreement and is pure.
+# This file only finds and reads the two files. rbconfig.rb is read, never
+# loaded.
+
+require_relative "../lib/ruby_wasm/release_bundle/config_agreement"
+
+def unexamined(what)
+  warn "UNEXAMINED  #{what}"
+  exit 2
+end
+
+case ARGV.size
+when 1
+  dir = ARGV[0]
+  compile_path = File.join(dir, "compile.raw.txt")
+  found = Dir.glob(File.join(dir, "prefix", "lib", "ruby", "*", "*", "rbconfig.rb"))
+  if found.size != 1
+    unexamined("expected one prefix/lib/ruby/*/*/rbconfig.rb under #{dir}, found #{found.size}: #{found.inspect}")
+  end
+  rbconfig_path = found.first.to_s
+when 2
+  compile_path, rbconfig_path = ARGV
+else
+  warn "usage: #{File.basename($PROGRAM_NAME)} <unpacked-bundle-directory>"
+  warn "       #{File.basename($PROGRAM_NAME)} <compile.raw.txt> <rbconfig.rb>"
+  exit 2
+end
+
+[compile_path, rbconfig_path].each { |p| unexamined("no #{p}") unless File.file?(p.to_s) }
+
+check =
+  RubyWasm::ReleaseBundle::ConfigAgreement.new(
+    compile_raw: File.binread(compile_path.to_s),
+    rbconfig: File.binread(rbconfig_path.to_s)
+  )
+
+refusals = check.refusals
+unless refusals.empty?
+  refusals.each { |r| warn "REFUSE #{r.clause}  #{r.message}" }
+  exit 1
+end
+
+puts "OK  6.5"
+puts "    #{compile_path}"
+puts "    #{rbconfig_path}"
+check.examined.each { |word, key| puts "      #{word}  in CONFIG[\"#{key}\"]" }

@@ -1,0 +1,48 @@
+module RubyWasm
+  module ReleaseBundle
+    class ConfigAgreement
+      class Refusal < Struct[untyped]
+        def self.new: (String clause, String message) -> Refusal
+
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      KEYS: Array[String]
+      EMULATED: Regexp
+      STACK: Regexp
+      COMPILER: Regexp
+      ASSIGNMENT: Regexp
+
+      @compile_raw: String
+      @rbconfig: String
+      @examined: Array[[String, String]]
+      @refusals: Array[Refusal]
+      @ran: bool
+
+      def initialize: (compile_raw: String, rbconfig: String) -> void
+
+      def refusals: () -> Array[Refusal]
+
+      def examined: () -> Array[[String, String]]
+
+      def pass?: () -> bool
+
+      private
+
+      def run: () -> Array[Refusal]
+
+      def refusal: (String message) -> Refusal
+
+      def read_config: () -> [Hash[String, String], Array[Refusal]]
+
+      def literal: (String rhs) -> String?
+
+      def stack_defines: (Array[String] words, Array[Refusal] out) -> Array[String]
+
+      def wasi_sdk_path: (Array[String] words, Array[Refusal] out) -> String?
+
+      def configure_words: (String configure_args, Array[Refusal] out) -> Array[String]?
+    end
+  end
+end
