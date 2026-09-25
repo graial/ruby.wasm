@@ -1,0 +1,68 @@
+module RubyWasm
+  module ReleaseBundle
+    class Postflight
+      FROZEN_TAG: String
+
+      NEW_TAG: String
+
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor fix: (:in_place | :new_tag)
+        attr_accessor message: String
+      end
+
+      class Release < Struct[untyped]
+        attr_accessor tag_name: String
+        attr_accessor draft: bool
+        attr_accessor prerelease: bool
+        attr_accessor immutable: bool
+        attr_accessor published_at: String?
+        attr_accessor asset_names: Array[String]
+      end
+
+      class Unexamined < StandardError
+      end
+
+      def self.release_from: (untyped json, tag: String) -> Release
+
+      @tag: String
+      @release: Release
+      @latest_tag: String?
+      @tag_target: String?
+      @release_tip: String?
+      @local_sha256: String
+      @sibling: String
+      @downloaded_sha256: String
+      @notes: Array[String]
+
+      attr_reader notes: Array[String]
+
+      def initialize: (
+        tag: String,
+        release: Release,
+        latest_tag: String?,
+        tag_target: String?,
+        release_tip: String?,
+        local_sha256: String,
+        sibling: String,
+        downloaded_sha256: String
+      ) -> void
+
+      def refusals: () -> Array[Refusal]
+
+      def pass?: () -> bool
+
+      private
+
+      def state_refusals: (MatchData match) -> Array[Refusal]
+
+      def latest_refusals: () -> Array[Refusal]
+
+      def target_refusals: () -> Array[Refusal]
+
+      def asset_refusals: (String asset) -> Array[Refusal]
+
+      def digests: (String published) -> Refusal?
+    end
+  end
+end

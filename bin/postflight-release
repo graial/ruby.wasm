@@ -1,0 +1,154 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Refuses a publication that has already happened, read back from the registry
+# after `gh release create`, and names the fix for each refusal.
+#
+#   bin/postflight-release <tag> <asset-directory> [remote]
+#   bin/postflight-release 3.3-wasm32-unknown-icp-minimal-20260919.1 ./out
+#
+# Exit 0: nothing refused. Exit 1: refusals, each marked [in place] or
+# [new tag]. Exit 2: something could not be examined. That is neither a pass
+# nor a refusal, and it is never reported as either.
+#
+# <asset-directory> is the one the preflight checked: the local tarball is one
+# of the three digests that must agree, so this runs on the machine that
+# published.
+#
+# The decision lives in RubyWasm::ReleaseBundle::Postflight and is pure. This
+# file only gathers facts:
+#   - the release object, through `gh api` with the operator's token
+#     (published_at and immutable exist only in the API);
+#   - the /releases/latest redirect, unauthenticated;
+#   - the tag's commit and release's tip, through `git ls-remote`;
+#   - the published sibling and tarball, from the download host, as a consumer
+#     fetches them;
+#   - the local tarball.
+# It changes nothing, anywhere.
+
+require "digest"
+require "json"
+require "net/http"
+require "open3"
+require "uri"
+require_relative "../lib/ruby_wasm/release_bundle/postflight"
+
+# Notes go to stdout and refusals to stderr; unbuffered, so they interleave in
+# the order they were written.
+$stdout.sync = true
+
+Postflight = RubyWasm::ReleaseBundle::Postflight
+Preflight = RubyWasm::ReleaseBundle::Preflight
+
+tag = ARGV[0]
+dir = ARGV[1]
+remote = ARGV[2] || "origin"
+
+if tag.nil? || dir.nil?
+  warn "usage: #{File.basename($PROGRAM_NAME)} <tag> <asset-directory> [remote]"
+  exit 2
+end
+
+def unexamined(what)
+  warn "UNEXAMINED  #{what}"
+  exit 2
+end
+
+def run(*cmd)
+  out, err, status = Open3.capture3(*cmd)
+  unexamined("#{cmd.join(" ")} failed: #{err.strip}") unless status.success?
+  out
+rescue Errno::ENOENT
+  unexamined("#{cmd.first} is not installed")
+end
+
+match = Preflight::TAG.match(tag) || unexamined("#{tag.inspect} is not a tag (1.3)")
+asset = Preflight.asset_name_for(tag, match)
+
+url = run("git", "remote", "get-url", remote).strip
+slug = url[%r{github\.com[:/]([^/]+/[^/]+?)(?:\.git)?\z}, 1] ||
+  unexamined("#{remote} is #{url}, which is not a GitHub repository")
+
+local_path = File.join(dir, asset)
+unexamined("no #{asset} in #{dir}; the local tarball is one of the three digests") unless File.exist?(local_path)
+local_sha256 = Digest::SHA256.file(local_path).hexdigest
+
+# The release object. gh exits non-zero on a rate limit or a 404; either way
+# nothing was examined.
+body = run("gh", "api", "repos/#{slug}/releases/tags/#{tag}")
+begin
+  release = Postflight.release_from(JSON.parse(body), tag: tag)
+rescue JSON::ParserError => e
+  unexamined("the release response is not JSON: #{e.message}")
+rescue Postflight::Unexamined => e
+  unexamined(e.message)
+end
+
+# GET, following redirects, with a limit. Returns the final response.
+def fetch(uri, limit = 5, &block)
+  unexamined("too many redirects fetching #{uri}") if limit.zero?
+  Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
+    http.request(Net::HTTP::Get.new(uri)) do |response|
+      if response.is_a?(Net::HTTPRedirection)
+        return fetch(URI.join(uri.to_s, response["location"]), limit - 1, &block)
+      end
+      unexamined("#{uri} answered #{response.code}") unless response.is_a?(Net::HTTPSuccess)
+      block ? response.read_body(&block) : response.read_body
+      return response
+    end
+  end
+end
+
+# The latest pointer, as a consumer resolves it: the redirect, not followed.
+latest_uri = URI("https://github.com/#{slug}/releases/latest")
+latest_tag =
+  Net::HTTP.start(latest_uri.host, latest_uri.port, use_ssl: true) do |http|
+    response = http.request(Net::HTTP::Head.new(latest_uri))
+    location = response["location"].to_s
+    if response.is_a?(Net::HTTPRedirection) && (t = location[%r{/releases/tag/([^/?#]+)\z}, 1])
+      URI.decode_www_form_component(t)
+    end
+  end
+
+# The tag's commit: the peeled line when the tag is annotated.
+tag_lines = run("git", "ls-remote", remote, "refs/tags/#{tag}", "refs/tags/#{tag}^{}").lines
+peeled = tag_lines.find { |l| l.end_with?("^{}\n") } || tag_lines.first
+tag_target = peeled&.split("\t")&.first
+release_tip = run("git", "ls-remote", remote, "refs/heads/release").split("\t").first
+
+base = "https://github.com/#{slug}/releases/download/#{URI.encode_www_form_component(tag)}"
+sibling = +""
+fetch(URI("#{base}/#{asset}.sha256")) { |chunk| sibling << chunk }
+sibling.force_encoding(Encoding::BINARY)
+hasher = Digest::SHA256.new
+fetch(URI("#{base}/#{asset}")) { |chunk| hasher << chunk }
+downloaded_sha256 = hasher.hexdigest
+
+postflight =
+  Postflight.new(
+    tag: tag,
+    release: release,
+    latest_tag: latest_tag,
+    tag_target: tag_target,
+    release_tip: release_tip,
+    local_sha256: local_sha256,
+    sibling: sibling,
+    downloaded_sha256: downloaded_sha256
+  )
+
+refusals = postflight.refusals
+postflight.notes.each { |n| puts "NOTE  #{n}" }
+
+unless refusals.empty?
+  refusals.each do |r|
+    warn "REFUSE #{r.clause} [#{r.fix == :in_place ? "in place" : "new tag"}]  #{r.message}"
+  end
+  exit 1
+end
+
+puts "OK  #{tag}"
+puts "    published #{release.published_at}, immutable #{release.immutable}"
+puts "    latest pointer #{latest_tag}"
+puts "    tag and release's tip #{tag_target}"
+puts "    #{asset}"
+puts "      local, sibling and download all #{downloaded_sha256}"
