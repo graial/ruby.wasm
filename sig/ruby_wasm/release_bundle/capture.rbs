@@ -7,6 +7,13 @@ module RubyWasm
       end
 
       class Selection < Struct[untyped]
+        def self.new: (
+          String? link_raw,
+          String? compile_raw,
+          Array[Refusal] refusals,
+          Array[String] notes
+        ) -> Selection
+
         attr_accessor link_raw: String?
         attr_accessor compile_raw: String?
         attr_accessor refusals: Array[Refusal]
