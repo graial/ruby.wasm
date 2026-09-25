@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "sibling"
+
 module RubyWasm
   module ReleaseBundle
     # Refusals that stop a publication, per contract section 1.
@@ -32,8 +34,9 @@ module RubyWasm
       #   rather than read from a clock, so the date refusal has a spec.
       # existing_tags: every tag name on the remote.
       # archive_members: the top-level entries inside the tarball (1.5).
-      # recorded_sha256 / actual_sha256: the sibling file's content and the
-      #   tarball's real digest (1.4).
+      # sibling: the .sha256 sibling's whole contents, unparsed, so that its
+      #   form is checked here and not assumed by whoever read it (1.4).
+      # actual_sha256: the tarball's real digest.
       def initialize(
         tag:,
         build_name:,
@@ -41,7 +44,7 @@ module RubyWasm
         existing_tags:,
         asset_name: nil,
         archive_members: nil,
-        recorded_sha256: nil,
+        sibling: nil,
         actual_sha256: nil
       )
         @tag = tag
@@ -50,7 +53,7 @@ module RubyWasm
         @existing_tags = existing_tags
         @asset_name = asset_name
         @archive_members = archive_members
-        @recorded_sha256 = recorded_sha256
+        @sibling = sibling
         @actual_sha256 = actual_sha256
       end
 
@@ -87,7 +90,7 @@ module RubyWasm
           out << Refusal.new(
             "1.3",
             "tag date #{match[:date]} is not today's UTC date #{@today}. The date " \
-            "is the day the release is created; a bundle packed under another " \
+            "is the day the release is published; a bundle packed under another " \
             "date is assembled again, not renamed"
           )
         end
@@ -114,22 +117,16 @@ module RubyWasm
       # The namespace is the tag's own Build and date, which is what a
       # collision is a collision in.
       def next_ordinal(match = TAG.match(@tag))
-        raise ArgumentError, "#{@tag.inspect} is not a tag, so it has no ordinals" if match.nil?
-
         prefix = "#{match[:build]}-#{match[:date]}."
         taken =
           @existing_tags.filter_map do |t|
             Integer(t.delete_prefix(prefix), exception: false) if t.start_with?(prefix)
           end
-        n = 1
-        n += 1 while taken.include?(n)
-        n
+        (1..).find { |n| !taken.include?(n) }
       end
 
       # 1.3's asset name, 1.4's sibling, 1.5's single top-level directory.
       def self.asset_name_for(tag, match = TAG.match(tag))
-        raise ArgumentError, "#{tag.inspect} is not a tag, so it names no asset" if match.nil?
-
         "ruby-#{match[:build]}-lib-#{match[:date]}.#{match[:ordinal]}.tar.gz"
       end
 
@@ -142,31 +139,29 @@ module RubyWasm
       def asset_refusals(match)
         # @type var out: Array[Refusal]
         out = []
-        # A local, because a nil check on an instance variable does not narrow it.
-        asset_name = @asset_name
-        return out if asset_name.nil?
+        return out if @asset_name.nil?
 
         expected = self.class.asset_name_for(@tag, match)
-        if asset_name != expected
-          out << Refusal.new("1.3", "asset is #{asset_name}, expected #{expected}")
+        if @asset_name != expected
+          out << Refusal.new("1.3", "asset is #{@asset_name}, expected #{expected}")
           return out
         end
 
         if @recorded_sha256.nil?
           out << Refusal.new(
             "1.4",
-            "no #{asset_name}.sha256 sibling; a download that cannot be " \
+            "no #{@asset_name}.sha256 sibling; a download that cannot be " \
             "checked is a download that is described"
           )
         elsif @actual_sha256 && @recorded_sha256 != @actual_sha256
           out << Refusal.new(
             "1.4",
-            "#{asset_name}.sha256 records #{@recorded_sha256}, tarball is #{@actual_sha256}"
+            "#{@asset_name}.sha256 records #{@recorded_sha256}, tarball is #{@actual_sha256}"
           )
         end
 
         unless @archive_members.nil?
-          stem = self.class.stem_for(asset_name)
+          stem = self.class.stem_for(@asset_name)
           if @archive_members != [stem]
             out << Refusal.new(
               "1.5",
@@ -175,6 +170,49 @@ module RubyWasm
               "somewhere fixed"
             )
           end
+        end
+
+        out
+      end
+
+      # 1.4: the sibling exists, is in sha256sum form exactly, names this asset,
+      # and records this tarball's digest. The name and the digest are reported
+      # separately: a sibling copied from another bundle is wrong in both, and
+      # knowing that is how a reader tells a copy from a corruption.
+      def sibling_refusals(asset_name)
+        # @type var out: Array[Refusal]
+        out = []
+        sibling = @sibling
+        sidecar = "#{asset_name}.sha256"
+
+        if sibling.nil?
+          out << Refusal.new(
+            "1.4",
+            "no #{sidecar} sibling; a download that cannot be checked is a " \
+            "download that is described"
+          )
+          return out
+        end
+
+        entry = Sibling.parse(sibling)
+        if entry.nil?
+          shown = sibling.length > 200 ? "#{sibling[0, 200]}..." : sibling
+          out << Refusal.new(
+            "1.4",
+            "#{sidecar} is not in sha256sum form: expected " \
+            "#{Sibling.line("<64 lowercase hex>", asset_name).inspect}, " \
+            "found #{shown.inspect}"
+          )
+          return out
+        end
+
+        if entry.name != asset_name
+          out << Refusal.new("1.4", "#{sidecar} names #{entry.name}, expected #{asset_name}")
+        end
+
+        actual = @actual_sha256
+        if actual && entry.digest != actual
+          out << Refusal.new("1.4", "#{sidecar} records #{entry.digest}, tarball is #{actual}")
         end
 
         out

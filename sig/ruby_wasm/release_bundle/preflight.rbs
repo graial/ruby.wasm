@@ -14,7 +14,7 @@ module RubyWasm
       @existing_tags: Array[String]
       @asset_name: String?
       @archive_members: Array[String]?
-      @recorded_sha256: String?
+      @sibling: String?
       @actual_sha256: String?
 
       def initialize: (
@@ -24,7 +24,7 @@ module RubyWasm
         existing_tags: Array[String],
         ?asset_name: String?,
         ?archive_members: Array[String]?,
-        ?recorded_sha256: String?,
+        ?sibling: String?,
         ?actual_sha256: String?
       ) -> void
 
@@ -41,6 +41,8 @@ module RubyWasm
       private
 
       def asset_refusals: (MatchData match) -> Array[Refusal]
+
+      def sibling_refusals: (String asset_name) -> Array[Refusal]
     end
   end
 end

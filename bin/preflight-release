@@ -10,7 +10,7 @@
 # Exit 0 and print the publish command, or exit 1 and print every refusal.
 #
 # The decision lives in RubyWasm::ReleaseBundle::Preflight and is pure. This
-# file only gathers facts: the remote's tags, the sibling digest, the tarball's
+# file only gathers facts: the remote's tags, the sibling's bytes, the tarball's
 # top level, the build_name in the tarball's own manifest.yml, and today's UTC
 # date. Keeping those apart is what lets every refusal be reached from a
 # spec without a network, and a preflight whose refusals are untested is a
@@ -60,15 +60,15 @@ asset_path = asset_name && File.join(dir, asset_name)
 
 archive_members = nil
 actual_sha256 = nil
-recorded_sha256 = nil
+sibling = nil
 build_name = nil
 
 if asset_path && File.exist?(asset_path)
   actual_sha256 = Digest::SHA256.file(asset_path).hexdigest
-  sibling = "#{asset_path}.sha256"
-  # The sibling may be bare or in sha256sum's "<digest>  <name>" form; take the
-  # first field either way.
-  recorded_sha256 = File.read(sibling).split.first if File.exist?(sibling)
+  # Handed over whole and unparsed: its form is a 1.4 refusal, not something
+  # this file may smooth over. binread, so a CRLF arrives as it is on disk.
+  sibling_path = "#{asset_path}.sha256"
+  sibling = File.binread(sibling_path) if File.exist?(sibling_path)
   archive_members =
     run("tar", "tzf", asset_path)
       .lines
@@ -90,7 +90,7 @@ elsif asset_name
   exit 1
 end
 
-# ADR-0042: the tag's date is the UTC calendar date the release is created.
+# ADR-0042: the tag's date is the UTC calendar date the release is published.
 now = Time.now.utc
 today = now.strftime("%Y%m%d")
 
@@ -102,7 +102,7 @@ preflight =
     existing_tags: existing_tags,
     asset_name: asset_name,
     archive_members: archive_members,
-    recorded_sha256: recorded_sha256,
+    sibling: sibling,
     actual_sha256: actual_sha256
   )
 
@@ -119,12 +119,12 @@ puts "    #{asset_name}  sha256 #{actual_sha256}"
 puts "    build_name #{build_name} (from #{Preflight.stem_for(asset_name.to_s)}/manifest.yml)"
 puts "    date #{today} is today in UTC (checked #{now.strftime("%H:%M")} UTC; publish before 24:00 UTC)"
 puts
-puts "Publish with (1.2 ordinary release, never a pre-release; 1.6 latest):"
+puts "Publish with (1.2 ordinary release, never a pre-release; ADR-0048 the latest pointer never moves):"
 puts <<~CMD
   gh release create #{tag} \\
     #{File.join(dir, asset_name.to_s)} \\
     #{File.join(dir, "#{asset_name}.sha256")} \\
     --target release \\
-    --latest \\
+    --latest=false \\
     --title #{tag}
 CMD

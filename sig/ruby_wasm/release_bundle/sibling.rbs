@@ -1,0 +1,16 @@
+module RubyWasm
+  module ReleaseBundle
+    module Sibling
+      FORM: Regexp
+
+      class Entry < Struct[untyped]
+        attr_accessor digest: String
+        attr_accessor name: String
+      end
+
+      def self.parse: (String contents) -> Entry?
+
+      def self.line: (String digest, String name) -> String
+    end
+  end
+end

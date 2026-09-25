@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "ruby_wasm/release_bundle/preflight"
+require "ruby_wasm/release_bundle/sibling"
 
 RSpec.describe RubyWasm::ReleaseBundle::Preflight do
   BUILD = "3.3-wasm32-unknown-icp-minimal"
@@ -8,6 +9,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
   ASSET = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1.tar.gz"
   STEM = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1"
   DIGEST = "a" * 64
+  SIBLING = "#{DIGEST}  #{ASSET}\n"
 
   def preflight(**overrides)
     described_class.new(
@@ -18,7 +20,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
         existing_tags: [],
         asset_name: ASSET,
         archive_members: [STEM],
-        recorded_sha256: DIGEST,
+        sibling: SIBLING,
         actual_sha256: DIGEST
       }.merge(overrides)
     )
@@ -113,6 +115,14 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
       expect(clauses(today: "20260912")).to eq(["1.3"])
     end
 
+    it "names the publication, not the creation, as the date's event" do
+      # ADR-0042: "created" is the word that leads a reader to created_at,
+      # which records the commit rather than the publication.
+      message = preflight(today: "20260912").refusals.first.message
+      expect(message).to include("published")
+      expect(message).not_to include("created")
+    end
+
     it "refuses a date that is not a calendar date, since it cannot be today" do
       expect(clauses(tag: "#{BUILD}-20260231.1", today: "20260911")).to include("1.3")
     end
@@ -122,13 +132,41 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
     end
   end
 
-  describe "1.4 — the sibling digest" do
+  describe "1.4 — the sibling" do
     it "refuses a missing .sha256" do
-      expect(clauses(recorded_sha256: nil)).to eq(["1.4"])
+      expect(clauses(sibling: nil)).to eq(["1.4"])
     end
 
     it "refuses a digest that does not match the tarball" do
       expect(clauses(actual_sha256: "b" * 64)).to eq(["1.4"])
+    end
+
+    # bin/preflight-release once took the first whitespace-separated field of
+    # the sibling, so a bare digest passed here and failed at every consumer
+    # parsing the sha256sum form. The whole file is now handed over and read
+    # by Sibling, the same parser the postflight uses.
+    it "refuses a bare digest, even the right one" do
+      expect(clauses(sibling: DIGEST)).to eq(["1.4"])
+    end
+
+    it "refuses a CRLF line ending, even with the right digest and name" do
+      expect(clauses(sibling: "#{DIGEST}  #{ASSET}\r\n")).to eq(["1.4"])
+    end
+
+    it "says what the form should be, and what it found" do
+      message = preflight(sibling: DIGEST).refusals.first.message
+      expect(message).to include("sha256sum form")
+      expect(message).to include(DIGEST.inspect)
+    end
+
+    it "refuses a sibling naming another file" do
+      # A sibling copied from another bundle carries a well-formed line about
+      # the wrong asset.
+      expect(clauses(sibling: "#{DIGEST}  other.tar.gz\n")).to eq(["1.4"])
+    end
+
+    it "reports a wrong name and a wrong digest separately" do
+      expect(clauses(sibling: "#{"b" * 64}  other.tar.gz\n")).to eq(%w[1.4 1.4])
     end
   end
 
@@ -150,7 +188,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
     # Independent failures are reported together so one publication attempt
     # surfaces all of them, rather than one per attempt.
     expect(
-      clauses(existing_tags: [TAG], recorded_sha256: nil, archive_members: ["ruby"])
+      clauses(existing_tags: [TAG], sibling: nil, archive_members: ["ruby"])
     ).to eq(%w[1.7 1.4 1.5])
   end
 end
