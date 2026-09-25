@@ -117,8 +117,6 @@ module RubyWasm
         )
       end
 
-      attr_reader :notes
-
       # tag: the tag just published.
       # release: its Release, from .release_from.
       # latest_tag: the tag /releases/latest redirects to; nil when it named none.
@@ -148,10 +146,33 @@ module RubyWasm
         # @type var notes: Array[String]
         notes = []
         @notes = notes
+        # @type var found: Array[Refusal]
+        found = []
+        @refusals = found
+        @ran = false
       end
 
+      # What is wrong, in-place fixes first. The check runs once, on whichever
+      # of this and #notes is called first, so neither depends on the other.
       def refusals
-        @notes.clear
+        run unless @ran
+        @refusals
+      end
+
+      # What was deliberately not refused, and why.
+      def notes
+        run unless @ran
+        @notes
+      end
+
+      def pass?
+        refusals.empty?
+      end
+
+      private
+
+      def run
+        @ran = true
         # @type var out: Array[Refusal]
         out = []
         match = Preflight::TAG.match(@tag)
@@ -160,6 +181,7 @@ module RubyWasm
             "1.3", :new_tag,
             "tag #{@tag.inspect} is not <build-name>-<YYYYMMDD>.<ordinal>, and it is published"
           )
+          @refusals = out
           return out
         end
         asset = Preflight.asset_name_for(@tag, match)
@@ -170,14 +192,8 @@ module RubyWasm
         out.concat(asset_refusals(asset))
         # In-place fixes first: they are what an operator can do now. The sort
         # is stable, so each group keeps the order above.
-        out.each_with_index.sort_by { |r, i| [r.fix == :in_place ? 0 : 1, i] }.map(&:first)
+        @refusals = out.each_with_index.sort_by { |r, i| [r.fix == :in_place ? 0 : 1, i] }.map(&:first)
       end
-
-      def pass?
-        refusals.empty?
-      end
-
-      private
 
       NEW_TAG =
         "This release stays published (1.7): add a supersession notice to its " \

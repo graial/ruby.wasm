@@ -43,8 +43,8 @@ module RubyWasm
       @sibling: String
       @downloaded_sha256: String
       @notes: Array[String]
-
-      attr_reader notes: Array[String]
+      @refusals: Array[Refusal]
+      @ran: bool
 
       def initialize: (
         tag: String,
@@ -59,9 +59,13 @@ module RubyWasm
 
       def refusals: () -> Array[Refusal]
 
+      def notes: () -> Array[String]
+
       def pass?: () -> bool
 
       private
+
+      def run: () -> Array[Refusal]
 
       def state_refusals: (MatchData match) -> Array[Refusal]
 

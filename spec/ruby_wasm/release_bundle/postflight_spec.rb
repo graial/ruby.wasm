@@ -181,6 +181,28 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       expect(p.notes.join).to include("ADR-0050")
     end
 
+    it "gives the note without refusals having been asked for first" do
+      frozen = described_class::FROZEN_TAG
+      asset = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260919.1.tar.gz"
+      json = release_json(
+        "tag_name" => frozen,
+        "immutable" => false,
+        "published_at" => "2026-09-19T16:42:49Z",
+        "assets" => [{ "name" => asset }, { "name" => "#{asset}.sha256" }]
+      )
+      p = described_class.new(
+        tag: frozen,
+        release: described_class.release_from(json, tag: frozen),
+        latest_tag: frozen,
+        tag_target: P_TIP,
+        release_tip: P_TIP,
+        local_sha256: P_DIGEST,
+        sibling: RubyWasm::ReleaseBundle::Sibling.line(P_DIGEST, asset),
+        downloaded_sha256: P_DIGEST
+      )
+      expect(p.notes.join).to include("ADR-0050")
+    end
+
     it "exempts that tag by its exact name only" do
       # Same Build and date, next ordinal: a later release, and not exempt.
       tag = "3.3-wasm32-unknown-icp-minimal-20260919.2"
