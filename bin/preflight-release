@@ -10,7 +10,8 @@
 # Exit 0 and print the publish command, or exit 1 and print every refusal.
 #
 # The decision lives in RubyWasm::ReleaseBundle::Preflight and is pure. This
-# file only gathers facts: the remote's tags, the sibling's bytes, the tarball's
+# file only gathers facts: the remote's tags, the repository's immutable-releases
+# setting (ADR-0050, through gh), the sibling's bytes, the tarball's
 # top level, the build_name in the tarball's own manifest.yml, and today's UTC
 # date. Keeping those apart is what lets every refusal be reached from a
 # spec without a network, and a preflight whose refusals are untested is a
@@ -20,6 +21,7 @@
 # the ordinal and says publish time is not when to decide what.
 
 require "digest"
+require "json"
 require "open3"
 require "yaml"
 require_relative "../lib/ruby_wasm/release_bundle/preflight"
@@ -53,6 +55,42 @@ existing_tags =
     .filter_map { |line| line.split("\t").last&.strip }
     .map { |ref| ref.delete_prefix("refs/tags/").delete_suffix("^{}") }
     .uniq
+
+# ADR-0050: whether immutable releases are enabled. The endpoint needs a token
+# with admin read access, and answers 404 when the setting is off, so the
+# repository is looked up first; Preflight reads a 404 as "not enabled" only
+# after that answered 200. `gh api -i` prints the status line whatever the
+# status, and exits non-zero above 299, so the status is read from the output,
+# not the exit code. No status line at all (no gh, no auth, no network) stops
+# here: that examined nothing.
+def gh_api(path)
+  out, err, _status = Open3.capture3("gh", "api", "-i", path)
+  code = out[%r{\AHTTP/\S+ (\d{3})}, 1]
+  unless code
+    warn "gh api #{path} gave no HTTP status: #{err.strip}"
+    exit 2
+  end
+  body_text = out.split(/\r?\n\r?\n/, 2)[1].to_s
+  body =
+    begin
+      JSON.parse(body_text)
+    rescue JSON::ParserError
+      nil
+    end
+  [code.to_i, body]
+rescue Errno::ENOENT
+  warn "gh is not installed; the preflight needs it to read ADR-0050's setting"
+  exit 2
+end
+
+url = run("git", "remote", "get-url", remote).strip
+slug = url[%r{github\.com[:/]([^/]+/[^/]+?)(?:\.git)?\z}, 1]
+unless slug
+  warn "#{remote} is #{url}, which is not a GitHub repository"
+  exit 2
+end
+repository_status, _repository = gh_api("repos/#{slug}")
+immutability = gh_api("repos/#{slug}/immutable-releases")
 
 match = Preflight::TAG.match(tag)
 asset_name = match && Preflight.asset_name_for(tag, match)
@@ -103,7 +141,9 @@ preflight =
     asset_name: asset_name,
     archive_members: archive_members,
     sibling: sibling,
-    actual_sha256: actual_sha256
+    actual_sha256: actual_sha256,
+    repository_status: repository_status,
+    immutability: immutability
   )
 
 refusals = preflight.refusals

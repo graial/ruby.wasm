@@ -15,6 +15,8 @@ module RubyWasm
       @asset_name: String?
       @archive_members: Array[String]?
       @sibling: String?
+      @repository_status: Integer?
+      @immutability: [Integer, untyped]?
       @actual_sha256: String?
 
       def initialize: (
@@ -25,7 +27,9 @@ module RubyWasm
         ?asset_name: String?,
         ?archive_members: Array[String]?,
         ?sibling: String?,
-        ?actual_sha256: String?
+        ?actual_sha256: String?,
+        ?repository_status: Integer?,
+        ?immutability: [Integer, untyped]?
       ) -> void
 
       def refusals: () -> Array[Refusal]
@@ -43,6 +47,8 @@ module RubyWasm
       def asset_refusals: (MatchData match) -> Array[Refusal]
 
       def sibling_refusals: (String asset_name) -> Array[Refusal]
+
+      def immutability_refusals: () -> Array[Refusal]
     end
   end
 end

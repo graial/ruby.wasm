@@ -37,6 +37,9 @@ module RubyWasm
       # sibling: the .sha256 sibling's whole contents, unparsed, so that its
       #   form is checked here and not assumed by whoever read it (1.4).
       # actual_sha256: the tarball's real digest.
+      # repository_status: the status GET /repos/{owner}/{repo} answered.
+      # immutability: [status, parsed body] from
+      #   GET /repos/{owner}/{repo}/immutable-releases (ADR-0050).
       def initialize(
         tag:,
         build_name:,
@@ -45,7 +48,9 @@ module RubyWasm
         asset_name: nil,
         archive_members: nil,
         sibling: nil,
-        actual_sha256: nil
+        actual_sha256: nil,
+        repository_status: nil,
+        immutability: nil
       )
         @tag = tag
         @build_name = build_name
@@ -54,6 +59,8 @@ module RubyWasm
         @asset_name = asset_name
         @archive_members = archive_members
         @sibling = sibling
+        @repository_status = repository_status
+        @immutability = immutability
         @actual_sha256 = actual_sha256
       end
 
@@ -156,6 +163,7 @@ module RubyWasm
         end
 
         out.concat(sibling_refusals(asset_name))
+        out.concat(immutability_refusals)
 
         unless @archive_members.nil?
           stem = self.class.stem_for(asset_name)
@@ -213,6 +221,67 @@ module RubyWasm
         end
 
         out
+      end
+
+      # ADR-0050: immutable releases are enabled, checked before publishing,
+      # because a release published mutable stays mutable. The endpoint answers
+      # 404 both when the setting is off and when the repository cannot be seen
+      # (a misspelling, or a token without access), so 404 is read as "not
+      # enabled" only after the repository itself answered 200.
+      def immutability_refusals
+        repository = @repository_status
+        immutability = @immutability
+
+        if repository.nil? || immutability.nil?
+          return [
+            Refusal.new(
+              "1.7",
+              "whether immutable releases are enabled was not read; a publication " \
+              "cannot be made immutable after the fact (ADR-0050)"
+            )
+          ]
+        end
+
+        if repository != 200
+          return [
+            Refusal.new(
+              "1.7",
+              "the repository lookup answered #{repository}, so a 404 from the " \
+              "immutable-releases endpoint could mean either; check the remote and the token"
+            )
+          ]
+        end
+
+        status, body = immutability
+        case status
+        when 200
+          return [] if body.is_a?(Hash) && body["enabled"] == true
+
+          [
+            Refusal.new(
+              "1.7",
+              "the immutable-releases endpoint answered 200 without enabled: true " \
+              "(#{body.inspect[0, 120]})"
+            )
+          ]
+        when 404
+          [
+            Refusal.new(
+              "1.7",
+              "immutable releases are not enabled on this repository, and a release " \
+              "published now would stay mutable (ADR-0050). Fix: enable release " \
+              "immutability in the repository's settings"
+            )
+          ]
+        else
+          [
+            Refusal.new(
+              "1.7",
+              "the immutable-releases endpoint answered #{status}; it needs a token " \
+              "with admin read access to the repository"
+            )
+          ]
+        end
       end
     end
   end

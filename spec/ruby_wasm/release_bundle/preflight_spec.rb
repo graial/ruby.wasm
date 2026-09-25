@@ -21,6 +21,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
         asset_name: ASSET,
         archive_members: [STEM],
         sibling: SIBLING,
+        repository_status: 200,
+        immutability: [200, { "enabled" => true, "enforced_by_owner" => false }],
         actual_sha256: DIGEST
       }.merge(overrides)
     )
@@ -167,6 +169,46 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
 
     it "reports a wrong name and a wrong digest separately" do
       expect(clauses(sibling: "#{"b" * 64}  other.tar.gz\n")).to eq(%w[1.4 1.4])
+    end
+  end
+
+  # ADR-0050: from the next publication, releases are immutable. A mutable
+  # release cannot be made immutable in place, so the setting is checked
+  # before anything is published. The endpoint answers 404 when the setting is
+  # off, and also when the repository cannot be seen, so the repository is
+  # looked up first and a 404 is only read as "not enabled" after it answered.
+  describe "1.7 — immutable releases are enabled (ADR-0050)" do
+    it "refuses a 404 from the setting, after the repository answered, as not enabled" do
+      r = preflight(immutability: [404, { "message" => "Not Found" }]).refusals
+      expect(r.map(&:clause)).to eq(["1.7"])
+      expect(r.first.message).to include("not enabled", "release immutability")
+    end
+
+    it "refuses enabled: false" do
+      expect(clauses(immutability: [200, { "enabled" => false }])).to eq(["1.7"])
+    end
+
+    it "refuses a 200 whose body does not say enabled: true, such as a rate-limit body" do
+      expect(clauses(immutability: [200, { "message" => "API rate limit exceeded" }])).to eq(["1.7"])
+      expect(clauses(immutability: [200, { "enabled" => "true" }])).to eq(["1.7"])
+    end
+
+    it "refuses when the repository did not answer, and does not call that 'not enabled'" do
+      r = preflight(repository_status: 404, immutability: [404, nil]).refusals
+      expect(r.map(&:clause)).to eq(["1.7"])
+      expect(r.first.message).to include("repository")
+      expect(r.first.message).not_to include("not enabled")
+    end
+
+    it "refuses another status, naming the admin read access the endpoint needs" do
+      r = preflight(immutability: [403, { "message" => "Must have admin rights" }]).refusals
+      expect(r.map(&:clause)).to eq(["1.7"])
+      expect(r.first.message).to include("403", "admin")
+    end
+
+    it "refuses when the setting was not read at all, rather than skipping the check" do
+      expect(clauses(immutability: nil)).to eq(["1.7"])
+      expect(clauses(repository_status: nil)).to eq(["1.7"])
     end
   end
 
