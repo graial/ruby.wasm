@@ -34,7 +34,20 @@ module RubyWasm
 
       Refusal = Struct.new(:clause, :fix, :message)
 
-      Release = Struct.new(:tag_name, :draft, :prerelease, :immutable, :published_at, :asset_names)
+      # What was read from the release object. A plain class rather than a
+      # Struct, for the reason Sibling::Entry gives.
+      class Release
+        attr_reader :tag_name, :draft, :prerelease, :immutable, :published_at, :asset_names
+
+        def initialize(tag_name, draft, prerelease, immutable, published_at, asset_names)
+          @tag_name = tag_name
+          @draft = draft
+          @prerelease = prerelease
+          @immutable = immutable
+          @published_at = published_at
+          @asset_names = asset_names
+        end
+      end
 
       # The registry's response was not something this can examine. That is
       # not a refusal and it is not a pass. It stops the postflight, because a

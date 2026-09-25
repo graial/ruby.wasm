@@ -11,13 +11,22 @@ module RubyWasm
         attr_accessor message: String
       end
 
-      class Release < Struct[untyped]
-        attr_accessor tag_name: String
-        attr_accessor draft: bool
-        attr_accessor prerelease: bool
-        attr_accessor immutable: bool
-        attr_accessor published_at: String?
-        attr_accessor asset_names: Array[String]
+      class Release
+        attr_reader tag_name: String
+        attr_reader draft: bool
+        attr_reader prerelease: bool
+        attr_reader immutable: bool
+        attr_reader published_at: String?
+        attr_reader asset_names: Array[String]
+
+        def initialize: (
+          String tag_name,
+          bool draft,
+          bool prerelease,
+          bool immutable,
+          String? published_at,
+          Array[String] asset_names
+        ) -> void
       end
 
       class Unexamined < StandardError

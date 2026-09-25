@@ -18,7 +18,17 @@ module RubyWasm
     module Sibling
       FORM = /\A(?<digest>[0-9a-f]{64}) {2}(?<name>[^\s]+)\n\z/
 
-      Entry = Struct.new(:digest, :name)
+      # A plain class, not a Struct: Steep types a Struct subclass's .new by
+      # Struct's own class-building signature, which only accepts strings and
+      # symbols.
+      class Entry
+        attr_reader :digest, :name
+
+        def initialize(digest, name)
+          @digest = digest
+          @name = name
+        end
+      end
 
       # The digest and file name a sibling states, or nil when it is not in the
       # form at all.
@@ -26,7 +36,7 @@ module RubyWasm
         match = FORM.match(contents)
         return nil if match.nil?
 
-        Entry.new(match[:digest], match[:name])
+        Entry.new(match[:digest].to_s, match[:name].to_s)
       end
 
       # What a sibling for this digest and asset contains, byte for byte.

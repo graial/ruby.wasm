@@ -3,9 +3,11 @@ module RubyWasm
     module Sibling
       FORM: Regexp
 
-      class Entry < Struct[untyped]
-        attr_accessor digest: String
-        attr_accessor name: String
+      class Entry
+        attr_reader digest: String
+        attr_reader name: String
+
+        def initialize: (String digest, String name) -> void
       end
 
       def self.parse: (String contents) -> Entry?

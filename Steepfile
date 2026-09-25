@@ -8,6 +8,7 @@ target :lib do
   ignore "lib/ruby_wasm/rake_task.rb"
 
   library "digest"
+  library "time"
   library "tmpdir"
   library "fileutils"
   library "open-uri"
