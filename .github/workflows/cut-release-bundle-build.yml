@@ -1,0 +1,120 @@
+# Builds, captures, assembles and packs one Build. The Build name is what varies
+# between a cut and an Acceptance run, and nothing here branches on it.
+#
+# This job holds no secret and only reads the repository: it compiles a great
+# deal of third-party code.
+name: Cut one Build
+
+on:
+  workflow_call:
+    inputs:
+      build_name:
+        type: string
+        required: true
+      main_commit:
+        type: string
+        required: true
+      ordinal:
+        type: string
+        required: true
+      reference:
+        type: string
+        required: true
+    outputs:
+      tag:
+        value: ${{ jobs.build.outputs.tag }}
+      asset:
+        value: ${{ jobs.build.outputs.asset }}
+      sha256:
+        value: ${{ jobs.build.outputs.sha256 }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      RESERVED: /home/shared/external/ladder/main
+      RELEASE: /home/me/release
+      OUT: /home/me/out
+      BUILD_NAME: ${{ inputs.build_name }}
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      asset: ${{ steps.pack.outputs.asset }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: release
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.main_commit }}
+          path: build-checkout
+          submodules: true
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.1"
+          bundler-cache: false
+      - name: Build the builder image
+        run: docker build --tag release-bundle-builder release/builders/wasm32-unknown-wasip1
+      - name: Start the builder, with the checkout at the Reserved path
+        run: |
+          mkdir out
+          docker run -dit \
+            -v "$GITHUB_WORKSPACE/build-checkout:$RESERVED" \
+            -v "$GITHUB_WORKSPACE/release:$RELEASE" \
+            -v "$GITHUB_WORKSPACE/out:$OUT" \
+            -w "$RESERVED" \
+            -e "RUBYWASM_UID=$(id -u)" -e "RUBYWASM_GID=$(id -g)" \
+            --name builder \
+            release-bundle-builder /bin/sh
+          echo 'docker exec -u me builder "$@"' > build-exec
+          chmod +x build-exec
+          timeout 30 bash -c 'until ./build-exec true; do sleep 1; done'
+      - name: Build and capture
+        env:
+          MAIN_COMMIT: ${{ inputs.main_commit }}
+          REFERENCE: ${{ inputs.reference }}
+        run: |
+          ./build-exec "$RELEASE/bin/ci-build-and-capture" \
+            "$RESERVED" "$RELEASE" "$RESERVED" "$BUILD_NAME" "$MAIN_COMMIT" workflow "$REFERENCE" \
+            "$OUT/cap" "$OUT/manifest-input.yml"
+      - name: Name the tag from GitHub's date
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORDINAL: ${{ inputs.ordinal }}
+        run: |
+          date=$(ruby release/bin/github-date "$GITHUB_REPOSITORY")
+          echo "tag=$BUILD_NAME-$date.$ORDINAL" >> "$GITHUB_OUTPUT"
+      - name: Assemble and pack
+        id: pack
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          ./build-exec ruby "$RELEASE/bin/pack-bundle" "$OUT/cap" "$OUT/manifest-input.yml" "$TAG" "$OUT/bundle"
+          asset=$(cd out/bundle && ls ./*.tar.gz | sed 's#^\./##')
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "out/bundle/$asset" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bundle-${{ inputs.build_name }}
+          path: |
+            out/bundle/*.tar.gz
+            out/bundle/*.tar.gz.sha256
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: capture-${{ inputs.build_name }}
+          path: |
+            out/cap
+            out/manifest-input.yml
+          if-no-files-found: warn

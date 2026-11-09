@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Refuses to start a Build whose result would not be the Build it claims.
+#
+#   bin/check-build-guards <checkout> <reserved-path> <release-checkout> <main-commit>
+#
+# Exit 0 printing what it examined; 1 printing every problem; 2 when a fact
+# could not be gathered.
+
+require "open3"
+require_relative "../lib/ruby_wasm/release_bundle/guards"
+
+checkout, reserved, release, main_commit = ARGV
+if [checkout, reserved, release, main_commit].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <checkout> <reserved-path> <release-checkout> <main-commit>"
+  exit 2
+end
+
+def git(dir, *args)
+  out, err, st = Open3.capture3("git", "-C", dir, *args)
+  unless st.success?
+    warn "git #{args.join(" ")} in #{dir} failed: #{err.strip}"
+    exit 2
+  end
+  out
+end
+
+toplevel = git(checkout, "rev-parse", "--show-toplevel").strip
+head = git(checkout, "rev-parse", "HEAD").strip
+changes = git(checkout, "status", "--porcelain", "--untracked-files=no").lines.map(&:chomp)
+on_path = ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? { |d| File.executable?(File.join(d, "wasm-opt")) }
+rubies = File.join(checkout, "rubies")
+cached = File.directory?(rubies) ? Dir.children(rubies).sort : []
+
+problems = RubyWasm::ReleaseBundle::Guards.problems(
+  toplevel: toplevel, reserved: File.expand_path(reserved), release: File.expand_path(release),
+  head: head, main_commit: main_commit, changes: changes,
+  environment: ENV.to_h, wasm_opt_on_path: on_path, cached: cached
+)
+
+puts "toplevel  : #{toplevel}"
+puts "head      : #{head}"
+puts "changes   : #{changes.length}"
+puts "rubies/   : #{cached.length} entries"
+unless problems.empty?
+  problems.each { |p| warn "STOP  #{p}" }
+  exit 1
+end
+puts "OK  guards"

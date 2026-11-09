@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Assembles a capture under a tag's stem, tars it and writes its sibling.
+#
+#   bin/pack-bundle <capture-dir> <manifest-input.yml> <tag> <out-dir>
+#
+# Writes <out-dir>/<stem>/, <stem>.tar.gz and <stem>.tar.gz.sha256. The date is
+# fixed before assembly (ADR-0042), and the directory is named once: never
+# renamed afterwards. tar keeps build/libruby-static.a a symlink (2.3).
+#
+# Exit 0 printing the tarball's digest; bin/assemble-bundle's status if it
+# fails; 2 when the arguments or the tools fail.
+
+require "digest"
+require "fileutils"
+require "open3"
+require "rbconfig"
+require "yaml"
+require_relative "../lib/ruby_wasm/release_bundle/preflight"
+require_relative "../lib/ruby_wasm/release_bundle/sibling"
+
+Preflight = RubyWasm::ReleaseBundle::Preflight
+Sibling = RubyWasm::ReleaseBundle::Sibling
+
+capture, input_path, tag, out = ARGV
+if [capture, input_path, tag, out].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <capture-dir> <manifest-input.yml> <tag> <out-dir>"
+  exit 2
+end
+
+match = Preflight::TAG.match(tag)
+unless match
+  warn "STOP  #{tag.inspect} is not <build-name>-<YYYYMMDD>.<ordinal>"
+  exit 2
+end
+build_name = YAML.safe_load_file(input_path)["build_name"]
+unless build_name == match[:build]
+  warn "STOP  the tag names Build #{match[:build]}, the manifest input says #{build_name}"
+  exit 2
+end
+
+asset = Preflight.asset_name_for(tag, match)
+stem = Preflight.stem_for(asset)
+FileUtils.mkdir_p(out)
+dest = File.join(out, stem)
+
+ok = system(RbConfig.ruby, File.join(__dir__, "assemble-bundle"), capture, input_path, dest)
+unless ok
+  warn "STOP  bin/assemble-bundle failed; nothing was packed"
+  exit($?.exitstatus || 2)
+end
+
+_out, err, st = Open3.capture3("tar", "-czf", asset, stem, chdir: out)
+unless st.success?
+  warn "STOP  tar failed: #{err.strip}"
+  exit 2
+end
+path = File.join(out, asset)
+digest = Digest::SHA256.file(path).hexdigest
+File.binwrite("#{path}.sha256", Sibling.line(digest, asset))
+puts "OK  #{asset}"
+puts "    sha256 #{digest}"

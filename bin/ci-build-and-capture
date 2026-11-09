@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Builds one Build at the Reserved path and captures it (ADR-0068).
+#
+#   bin/ci-build-and-capture <checkout> <release-checkout> <reserved-path> \
+#     <build-name> <main-commit> <capture> <reference|none> <capture-dir> <manifest-input.yml>
+#
+# Run inside the builder image. Stops at the first step that fails, so nothing
+# is built before the guards pass and no Build is compared before it is
+# captured. No make target runs in the Build tree after the Build.
+#
+# A Reference fixture carries the source-date-epoch its Build was made under,
+# because OpenSSL embeds its build time in what it builds. A run holding itself
+# to the fixture builds under the same date. With no reference it sets none.
+set -euo pipefail
+
+if [ "$#" -ne 9 ]; then
+  echo "usage: ci-build-and-capture <checkout> <release-checkout> <reserved-path> <build-name> <main-commit> <capture> <reference|none> <capture-dir> <manifest-input.yml>" >&2
+  exit 2
+fi
+checkout=$1 release=$2 reserved=$3 build_name=$4 main_commit=$5 capture=$6 reference=$7 capture_dir=$8 manifest_input=$9
+
+target=${build_name#*-}
+target=${target%-*}
+tree="$checkout/build/$target/ruby-$build_name"
+
+unset SOURCE_DATE_EPOCH
+if [ "$reference" != none ]; then
+  epoch_file="$release/$reference/source-date-epoch"
+  if [ ! -f "$epoch_file" ]; then
+    echo "STOP  $epoch_file is not a file" >&2
+    exit 2
+  fi
+  epoch=$(cat "$epoch_file")
+  if ! [[ "$epoch" =~ ^[0-9]+$ ]]; then
+    echo "STOP  $epoch_file holds '$epoch', not a number of seconds" >&2
+    exit 2
+  fi
+  export SOURCE_DATE_EPOCH="$epoch"
+  echo "source-date-epoch: $epoch"
+fi
+
+cd "$checkout"
+bundle install
+bundle exec rake compile
+ruby "$release/bin/check-build-guards" "$checkout" "$reserved" "$release" "$main_commit"
+bundle exec rake "build:$build_name"
+ruby "$release/bin/compose-manifest-input" "$checkout" "$build_name" "$capture" "$manifest_input"
+ruby "$release/bin/capture-recipes" "$tree" "$checkout" "$capture_dir" "$manifest_input"
+if [ "$reference" = none ]; then
+  ruby "$release/bin/compare-reference" "$tree" none "$capture_dir"
+else
+  ruby "$release/bin/compare-reference" "$tree" "$release/$reference" "$capture_dir"
+fi

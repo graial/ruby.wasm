@@ -76,6 +76,15 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
     end
   end
 
+  describe ".publish_command" do
+    it "targets the commit, leaves the pointer alone, and is an ordinary release" do
+      cmd = described_class.publish_command(tag: TAG, dir: "out", asset_name: ASSET, release_commit: COMMIT_ID)
+      expect(cmd.first(4)).to eq(["gh", "release", "create", TAG])
+      expect(cmd.join(" ")).to include("--target #{COMMIT_ID}", "--latest=false", "out/#{ASSET}", "out/#{ASSET}.sha256")
+      expect(cmd).not_to include("--prerelease", "--draft")
+    end
+  end
+
   describe "ADR-0047 — the tag's commit is the bundle's release_commit" do
     it "refuses when the manifest gave none" do
       expect(clauses(release_commit: nil)).to eq(["ADR-0047"])

@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Holds a Build to a Reference fixture, or says plainly that it did not.
+#
+#   bin/compare-reference <build-tree> <reference-dir|none> <capture-dir>
+#
+# With a directory: every digest and the file set must match its
+# tree-before.sha256, and the capture's link recipe must equal the one selected
+# from its copy.build-ext-n.out. Exit 0 on a match; 1 printing every difference;
+# 2 when the reference could not be read.
+
+require "digest"
+require_relative "../lib/ruby_wasm/release_bundle/capture"
+require_relative "../lib/ruby_wasm/release_bundle/reference"
+
+Reference = RubyWasm::ReleaseBundle::Reference
+Capture = RubyWasm::ReleaseBundle::Capture
+
+tree, reference, capture = ARGV
+if [tree, reference, capture].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <build-tree> <reference-dir|none> <capture-dir>"
+  exit 2
+end
+
+if reference == "none"
+  puts "no reference digests: this Build was compared with nothing"
+  exit 0
+end
+
+def stop(message)
+  warn "STOP  #{message}"
+  exit 2
+end
+
+listing = File.join(reference, "tree-before.sha256")
+stop "#{listing} is not a file" unless File.file?(listing)
+want = Reference.parse(File.binread(listing)) || stop("#{listing} is not in sha256sum form")
+stop "#{listing} lists nothing" if want.empty?
+
+transcripts = %w[copy.build-ext-n.out tree.main-n.out copy.main-n.out].to_h { |n| [n, File.join(reference, n)] }
+transcripts.each_value { |p| stop "#{p} is not a file" unless File.file?(p) }
+selection = Capture.select(
+  link_transcript: File.binread(transcripts["copy.build-ext-n.out"]),
+  main_transcript: File.binread(transcripts["tree.main-n.out"]),
+  copy_main_transcript: File.binread(transcripts["copy.main-n.out"])
+)
+stop "the reference's own link recipe could not be selected" unless selection.refusals.empty?
+link = File.join(capture, "link.raw.txt")
+stop "#{link} is not a file" unless File.file?(link)
+
+have = {}
+Dir.glob("**/*", File::FNM_DOTMATCH, base: tree).each do |relative|
+  path = "./#{relative}"
+  full = File.join(tree, relative)
+  next unless File.lstat(full).file? && Reference.selected?(path)
+  have[path] = Digest::SHA256.file(full).hexdigest
+end
+stop "#{tree} holds no file the reference selects" if have.empty?
+
+differences = Reference.differences(
+  want: want, have: have, want_link: selection.link_raw.to_s, have_link: File.binread(link)
+)
+puts "compared  : #{want.length} files in the reference, #{have.length} in this Build, and the link recipe"
+unless differences.empty?
+  differences.each { |d| warn "DIFFERS  #{d}" }
+  warn "#{differences.length} difference(s) from #{reference}"
+  exit 1
+end
+puts "OK  reproduces #{reference}"

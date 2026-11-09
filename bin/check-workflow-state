@@ -1,0 +1,43 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Refuses to go on unless a workflow is in the stated state.
+#
+#   bin/check-workflow-state <owner/repo> <workflow-file> <state>
+#
+# Exit 0 when it is; 1 when it is in another; 2 when it could not be read.
+
+require "json"
+require "open3"
+
+slug, workflow, wanted = ARGV
+if [slug, workflow, wanted].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <owner/repo> <workflow-file> <state>"
+  exit 2
+end
+
+begin
+  out, err, st = Open3.capture3("gh", "api", "repos/#{slug}/actions/workflows/#{workflow}")
+rescue Errno::ENOENT
+  warn "gh is not installed"
+  exit 2
+end
+unless st.success?
+  warn "the state of #{workflow} could not be read: #{err.strip}"
+  exit 2
+end
+state =
+  begin
+    JSON.parse(out)["state"]
+  rescue JSON::ParserError
+    nil
+  end
+if state.nil?
+  warn "the response for #{workflow} carries no state"
+  exit 2
+end
+if state != wanted
+  warn "STOP  #{workflow} is #{state}, not #{wanted}"
+  exit 1
+end
+puts "OK  #{workflow} is #{state}"

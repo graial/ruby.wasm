@@ -183,6 +183,18 @@ module RubyWasm
         asset_name.delete_suffix(".tar.gz")
       end
 
+      # The one definition of the publication: 1.2 an ordinary release, ADR-0047
+      # the commit that cut the bundle, ADR-0048 the pointer stays where it is.
+      def self.publish_command(tag:, dir:, asset_name:, release_commit:)
+        [
+          "gh", "release", "create", tag,
+          File.join(dir, asset_name), File.join(dir, "#{asset_name}.sha256"),
+          "--target", release_commit,
+          "--latest=false",
+          "--title", tag
+        ]
+      end
+
       private
 
       # ADR-0047: the tag will target the commit that cut this bundle, which

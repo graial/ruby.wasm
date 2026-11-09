@@ -1,0 +1,39 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Runs the publication the preflight printed, from the same definition.
+#
+#   bin/publish-release <tag> <asset-directory>
+#
+# It does no checking of its own: bin/preflight-release does, and runs first.
+# Exit is gh's; 2 when the tag or its bundle cannot be read.
+
+require "open3"
+require "yaml"
+require_relative "../lib/ruby_wasm/release_bundle/preflight"
+
+Preflight = RubyWasm::ReleaseBundle::Preflight
+
+tag, dir = ARGV
+if [tag, dir].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <tag> <asset-directory>"
+  exit 2
+end
+
+match = Preflight::TAG.match(tag)
+unless match
+  warn "STOP  #{tag.inspect} is not <build-name>-<YYYYMMDD>.<ordinal>"
+  exit 2
+end
+asset = Preflight.asset_name_for(tag, match)
+manifest, err, st = Open3.capture3("tar", "xzOf", File.join(dir, asset), "#{Preflight.stem_for(asset)}/manifest.yml")
+unless st.success?
+  warn "STOP  the bundle's manifest could not be read: #{err.strip}"
+  exit 2
+end
+commit = YAML.safe_load(manifest).fetch("release_commit")
+unless commit.is_a?(String) && Preflight::COMMIT.match?(commit)
+  warn "STOP  release_commit is #{commit.inspect}"
+  exit 2
+end
+exec(*Preflight.publish_command(tag: tag, dir: dir, asset_name: asset, release_commit: commit))

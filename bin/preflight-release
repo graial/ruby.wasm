@@ -25,6 +25,7 @@ require "digest"
 require "json"
 require "net/http"
 require "open3"
+require "shellwords"
 require "uri"
 require "yaml"
 require_relative "../lib/ruby_wasm/release_bundle/preflight"
@@ -209,11 +210,6 @@ puts "    latest pointer #{latest_tag}"
 puts "    date #{today} is today in UTC on GitHub's clock (checked #{now.strftime("%H:%M")} UTC; publish before 24:00 UTC)"
 puts
 puts "Publish with (1.2 ordinary release, never a pre-release; ADR-0047 the commit that cut it; ADR-0048 the latest pointer never moves):"
-puts <<~CMD
-  gh release create #{tag} \\
-    #{File.join(dir, asset_name.to_s)} \\
-    #{File.join(dir, "#{asset_name}.sha256")} \\
-    --target #{release_commit} \\
-    --latest=false \\
-    --title #{tag}
-CMD
+puts Shellwords.join(
+  Preflight.publish_command(tag: tag, dir: dir, asset_name: asset_name.to_s, release_commit: release_commit.to_s)
+)

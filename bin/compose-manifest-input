@@ -1,0 +1,45 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Writes manifest-input.yml for a Build the workflow has just made.
+#
+#   bin/compose-manifest-input <checkout> <build-name> <workflow|manual> <output.yml>
+#
+# Exit 0 having written it; 2 when a value could not be read.
+
+require "digest"
+require "open3"
+require "yaml"
+require_relative "../lib/ruby_wasm/release_bundle/manifest_input"
+
+ManifestInput = RubyWasm::ReleaseBundle::ManifestInput
+
+checkout, build_name, capture, output = ARGV
+if [checkout, build_name, capture, output].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <checkout> <build-name> <workflow|manual> <output.yml>"
+  exit 2
+end
+checkout = File.expand_path(checkout)
+
+begin
+  wasm_opt = File.join(checkout, "build/toolchain/binaryen/bin/wasm-opt")
+  version, err, st = Open3.capture3(wasm_opt, "--version")
+  raise ManifestInput::Stop, "#{wasm_opt} --version failed: #{err.strip}" unless st.success?
+
+  match = ManifestInput::NAME.match(build_name) || raise(ManifestInput::Stop, "#{build_name.inspect} is not <version>-<triple>-<profile>")
+  wrapper = File.join(checkout, "build/checkouts", match[:version], "tool/wasm-clangw")
+  raise ManifestInput::Stop, "#{wrapper} is not a file" unless File.file?(wrapper)
+
+  input = ManifestInput.compose(
+    checkout: checkout, build_name: build_name, capture: capture,
+    wasi_sdk_dirs: Dir.glob(File.join(checkout, "build/toolchain/wasi-sdk-*")).select { |d| File.directory?(d) }.sort,
+    wasi_vfs_archives: Dir.glob(File.join(checkout, "build/*/wasi-vfs-*/libwasi_vfs.a")).sort,
+    binaryen: version.strip, cc_wrapper_sha256: Digest::SHA256.file(wrapper).hexdigest
+  )
+  File.write(output, YAML.dump(input))
+rescue ManifestInput::Stop, Errno::ENOENT => e
+  warn "STOP  #{e.message}"
+  exit 2
+end
+puts "OK  #{output}"
+puts "    tools #{input["tools"].map { |k, v| "#{k}=#{v}" }.join(" ")}"

@@ -1,0 +1,31 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Prints today's UTC date on GitHub's clock, as YYYYMMDD (ADR-0042).
+#
+#   bin/github-date <owner/repo>
+#
+# Exit 2 when GitHub gave no readable Date header. The local clock is no
+# fallback.
+
+require "open3"
+require_relative "../lib/ruby_wasm/release_bundle/preflight"
+
+slug = ARGV[0]
+if slug.nil?
+  warn "usage: #{File.basename($PROGRAM_NAME)} <owner/repo>"
+  exit 2
+end
+
+begin
+  out, err, _st = Open3.capture3("gh", "api", "-i", "repos/#{slug}")
+rescue Errno::ENOENT
+  warn "gh is not installed"
+  exit 2
+end
+now = RubyWasm::ReleaseBundle::Preflight.github_time(out)
+unless now
+  warn "gh api repos/#{slug} gave no readable Date header: #{err.strip}"
+  exit 2
+end
+puts now.strftime("%Y%m%d")

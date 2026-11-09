@@ -1,0 +1,29 @@
+module RubyWasm
+  module ReleaseBundle
+    module ManifestInput
+      class Stop < StandardError
+      end
+
+      NAME: Regexp
+      CAPTURES: Array[String]
+
+      def self.tree: (checkout: String, build_name: String) -> String
+
+      def self.compose: (
+        checkout: String,
+        build_name: String,
+        capture: String,
+        wasi_sdk_dirs: Array[String],
+        wasi_vfs_archives: Array[String],
+        binaryen: String,
+        cc_wrapper_sha256: String
+      ) -> Hash[String, untyped]
+
+      private
+
+      def self.only: (Array[String] matches, String pattern) -> String
+
+      def self.version: (String name, String prefix) -> String
+    end
+  end
+end

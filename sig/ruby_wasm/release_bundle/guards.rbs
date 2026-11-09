@@ -1,0 +1,24 @@
+module RubyWasm
+  module ReleaseBundle
+    module Guards
+      COMMIT: Regexp
+      ENVIRONMENT: Array[String]
+
+      def self.problems: (
+        toplevel: String,
+        reserved: String,
+        release: String,
+        head: String,
+        main_commit: String,
+        changes: Array[String],
+        environment: Hash[String, String],
+        wasm_opt_on_path: bool,
+        cached: Array[String]
+      ) -> Array[String]
+
+      private
+
+      def self.inside?: (String path, String parent) -> bool
+    end
+  end
+end

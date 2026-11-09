@@ -1,0 +1,18 @@
+module RubyWasm
+  module ReleaseBundle
+    module Reference
+      LINE: Regexp
+
+      def self.selected?: (String path) -> bool
+
+      def self.parse: (String text) -> Hash[String, String]?
+
+      def self.differences: (
+        want: Hash[String, String],
+        have: Hash[String, String],
+        want_link: String,
+        have_link: String
+      ) -> Array[String]
+    end
+  end
+end

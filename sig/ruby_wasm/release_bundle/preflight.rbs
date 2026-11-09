@@ -53,6 +53,8 @@ module RubyWasm
 
       def self.stem_for: (String asset_name) -> String
 
+      def self.publish_command: (tag: String, dir: String, asset_name: String, release_commit: String) -> Array[String]
+
       private
 
       def target_refusals: () -> Array[Refusal]

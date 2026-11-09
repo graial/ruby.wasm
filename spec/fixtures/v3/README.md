@@ -27,5 +27,14 @@ comparisons between them are meaningful.
 The real trees were byte-identical before and after: 189 files for `minimal`
 and 294 for `full`.
 
+`source-date-epoch` in each directory is the date a Build must be made under to
+reproduce that directory (ADR-0070). OpenSSL embeds its build time, and `full`
+links it into `ruby`, so it is the one thing that varies between two otherwise
+identical `full` Builds. The value is 2026-11-09 00:00:00 UTC. The two `ruby`
+lines in `full/tree-{before,after}.sha256` were retaken under that date, in a
+trial of the pipeline's own scripts, at the Reserved path. That trial's other
+292 files matched the digests of 8 November, and every other file here is as
+gathered then.
+
 They are kept here, and not on the Build machine, because the folder holding
 the previous run's fixtures was lost.

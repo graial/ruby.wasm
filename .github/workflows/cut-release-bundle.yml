@@ -1,0 +1,156 @@
+# Cuts one Release Bundle: a Rehearsal unless `publish` is true.
+#
+# Runs on release, which is this repository's default branch because GitHub
+# requires a workflow_dispatch workflow to be on the default branch. Every
+# dispatch also runs an Acceptance run of a Build on another Target Triple,
+# with the same job, which never publishes. Publication needs both to pass.
+name: Cut a Release Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_name:
+        type: string
+        description: "Build name: <version>-<triple>-<profile>"
+        required: true
+      main_commit:
+        type: string
+        description: "The main commit to build, as a full commit id"
+        required: true
+      ordinal:
+        type: string
+        description: "The tag's ordinal. A taken one is refused, and the next free one reported"
+        required: true
+      reference:
+        type: string
+        description: "A committed fixture directory this Build must reproduce, or the word none"
+        required: true
+      publish:
+        type: boolean
+        description: "Publish. Otherwise this is a Rehearsal"
+        default: false
+
+permissions: {}
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.1"
+          bundler-cache: false
+      - name: Upstream's release workflow is disabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ruby bin/check-workflow-state "$GITHUB_REPOSITORY" release.yml disabled_manually
+      - name: The inputs are usable
+        env:
+          ORDINAL: ${{ inputs.ordinal }}
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          if ! [[ "$ORDINAL" =~ ^[1-9][0-9]*$ ]]; then
+            echo "ordinal $ORDINAL is not a positive integer" >&2
+            exit 1
+          fi
+          if [ "$PUBLISH" = true ] && [ "$GITHUB_REF" != refs/heads/release ]; then
+            echo "publish is refused on $GITHUB_REF: it needs refs/heads/release" >&2
+            exit 1
+          fi
+
+  cut:
+    needs: [guard]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cut-release-bundle-build.yml
+    with:
+      build_name: ${{ inputs.build_name }}
+      main_commit: ${{ inputs.main_commit }}
+      ordinal: ${{ inputs.ordinal }}
+      reference: ${{ inputs.reference }}
+
+  acceptance:
+    needs: [guard]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cut-release-bundle-build.yml
+    with:
+      build_name: 3.3-wasm32-unknown-wasip1-minimal
+      main_commit: ${{ inputs.main_commit }}
+      ordinal: ${{ inputs.ordinal }}
+      reference: none
+
+  preflight:
+    needs: [cut, acceptance]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.1"
+          bundler-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundle-${{ inputs.build_name }}
+          path: cut
+      - name: Preflight
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABILITY_READ_TOKEN }}
+          FROZEN_LATEST_TAG: ${{ vars.FROZEN_LATEST_TAG }}
+          TAG: ${{ needs.cut.outputs.tag }}
+        run: ruby bin/preflight-release "$TAG" cut
+
+  publish:
+    needs: [cut, preflight]
+    if: ${{ inputs.publish && github.ref == 'refs/heads/release' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4.1"
+          bundler-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: bundle-${{ inputs.build_name }}
+          path: cut
+      - name: The tarball is the one the Build job packed
+        env:
+          WANT: ${{ needs.cut.outputs.sha256 }}
+          ASSET: ${{ needs.cut.outputs.asset }}
+        run: |
+          have=$(sha256sum "cut/$ASSET" | cut -d' ' -f1)
+          if [ -z "$WANT" ] || [ "$have" != "$WANT" ]; then
+            echo "cut/$ASSET is $have; the Build job packed $WANT" >&2
+            exit 1
+          fi
+          (cd cut && sha256sum --check --strict "$ASSET.sha256")
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.cut.outputs.tag }}
+        run: ruby bin/publish-release "$TAG" cut
+      - name: Postflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROZEN_LATEST_TAG: ${{ vars.FROZEN_LATEST_TAG }}
+          TAG: ${{ needs.cut.outputs.tag }}
+        run: ruby bin/postflight-release "$TAG" cut
