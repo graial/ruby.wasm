@@ -8,11 +8,12 @@ interprets them.** Every field in a bundle is something the Build machine
 observed. Nothing in it is a claim about the machine that downloads it, and
 nothing in it is rewritten to suit one.
 
-**Version 2.** Numbering restarted at v1: four earlier drafts carried the
+**Version 3.** Numbering restarted at v1: four earlier drafts carried the
 numbers v1 through v4, and no bundle was ever cut under any of them. v1 was
-frozen with a consumer fixture keyed to it and no bundle cut under it, and is
-superseded by this version; what changed, and why, is at the end of this
-document. A version means something once an artifact declares it, and until
+frozen with a consumer fixture keyed to it and no bundle cut under it. v2 was
+frozen with one bundle cut under it, `3.3-wasm32-unknown-icp-minimal-20260919.1`,
+which stays published and stays v2. This version supersedes both; what changed,
+and why, is at the end of this document. A version means something once an artifact declares it, and until
 then it is a heading. Every bundle states the version
 it was cut under in `manifest.contract_version` (4.9), and edits to this
 document arrive in batches, so that each version costs a consumer one fixture
@@ -27,9 +28,9 @@ branch of `graial/ruby.wasm`. The branch is permanent: `main` carries exactly
 the patch set currently under review upstream, and the workflow, the extractor
 and this document are not part of it.
 
-**1.2** An ordinary release, never a pre-release. GitHub's latest-release
-endpoint skips pre-releases, and a consumer resolving `latest` would resolve
-nothing.
+**1.2** An ordinary release, never a pre-release. A pre-release is a
+different kind of publication, which GitHub's listings and endpoints treat
+apart, and a consumer filtering on that would skip the bundle.
 
 **1.3** Tag is Build name, date, ordinal, the ordinal always present:
 
@@ -39,31 +40,46 @@ nothing.
 
 Asset: `ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1.tar.gz`.
 
-The date is the UTC calendar date on which the release is created. The tag
-names a publication, and GitHub records a release's `created_at` in UTC, so
-the date can be checked against the registry by anyone; a Build or capture
-date could only be taken on the fork's word.
+The date is the UTC calendar date on which the release is published: the
+date part of the release's `published_at`, which GitHub records in UTC. The
+tag names a publication, so the date can be checked against the registry by
+anyone; a Build or capture date could only be taken on the fork's word.
+`created_at` is not that date. It is the date of the commit a release points
+at, which can precede publication by days.
+
+The date is never taken from the clock of the machine that cut the bundle. A
+machine whose clock is wrong would name a tag that its own postflight then
+refuses, after the name is spent (1.7).
 
 The ordinal carries uniqueness and nothing else; a suffix that exists only
 sometimes is a suffix whose absence means something, and publish time is not
 when to decide what.
 
 **1.4** A sibling asset `<asset>.sha256` carries the tarball's own sha256, so
-a download can be checked rather than described.
+a download can be checked rather than described. Its form is `sha256sum`'s,
+exactly: the digest as 64 lowercase hex characters, two spaces, the asset's
+file name, and one `\n`. A bare digest, a CRLF ending, a binary-mode `*` and
+BSD's tagged form are each a different file, and a consumer may refuse them.
 
 **1.5** The tarball unpacks to exactly one top-level directory named for the
 asset stem. A consumer is expected to use `--strip-components=1` into a fixed
 destination, so the varying stem never reaches a path anyone writes down.
 
-**1.6** `latest` points at the one Build the fork supports as a default. A
-second Build publishes with `--latest=false` (`gh release create`, or
-`make_latest: false` on the REST endpoint), flipped deliberately if the
-supported default changes.
+**1.6** GitHub's Latest pointer is frozen at
+`3.3-wasm32-unknown-icp-minimal-20260919.1` and means nothing. It is never a
+way to select a bundle, and no Build is a default. Every publication passes
+`--latest=false` (`gh release create`, or `make_latest: false` on the REST
+endpoint), and the postflight refuses a publication that moved it. A consumer
+pins a tag.
 
-**1.7** Assets and tags are immutable and are never deleted. A correction is a
-new tag. A superseded release stays published: a consumer records a resolved
-tag, and a deleted tag resolves to nothing — the same failure immutability
-guards against, arrived at from the other side.
+**1.7** Assets and tags are immutable and are never deleted. A published asset
+is never replaced, and the registry enforces that: the repository's release
+immutability is on, and the preflight refuses to publish while it is off. A
+correction is a new tag. A tag name once used stays spent, even if its release
+never completed, so the next attempt takes the next ordinal. A superseded
+release stays published: a consumer records a resolved tag, and a deleted tag
+resolves to nothing — the same failure immutability guards against, arrived at
+from the other side.
 
 **1.8** A release body carries no authority. Nothing hashes it, nothing parses
 it, no tool reads it. It may be edited, and an appended supersession notice
@@ -85,22 +101,41 @@ a fact about a bundle appears.
   build/          <- mirrors the Build tree's relative layout
   prefix/         <- the install prefix, its own root
   wasi-vfs/libwasi_vfs.a
+  lib/<key>/      <- one per root path key outside the tree (4.7), if any
 ```
 
-**2.1** `build/` holds exactly these four members at exactly these paths, and
-nothing else:
+**2.1** `build/` holds exactly the members the link recipe names, at their
+Build-tree relative paths, and nothing else. The link recipe is read by the
+grammar of 6.1, and its words give the members:
 
-| Path in bundle | Named by the link recipe |
+- every relative object or archive on the line is a member at its path,
+  except `main.o`, which a consumer compiles for itself from
+  `compile.raw.txt` (7.7);
+- `-lruby-static` resolves through `-L.` to `libruby-static.a`, which is a
+  member as the symlink of 2.3;
+- nothing else is.
+
+So membership is a fact about each Build, not a constant. For the two v3
+Builds the line gives:
+
+| Build | `build/` |
 | --- | --- |
-| `build/libruby-static.a` | yes, via `-L.` and `-lruby-static` — symlink, see 2.3 |
-| `build/ext/extinit.o` | yes |
-| `build/enc/libenc.a` | no |
-| `build/enc/libtrans.a` | no |
+| `3.3-wasm32-unknown-icp-minimal` | `dmyext.o`, `enc/encinit.o`, `enc/libenc.a`, `enc/libtrans.a`, `libruby-static.a` |
+| `3.3-wasm32-unknown-icp-full` | `ext/extinit.o`, the 26 `ext/**/*.a` archives, the same three `enc/` words, `libruby-static.a` |
+
+These rows are examples of the rule and not part of it. A bundle's own link
+recipe is what its `build/` is checked against.
+
+**`lib/<key>/`** holds, for each root path key outside the tree (4.7), the
+archives that the line's `-l` words resolve to in that root, and nothing else:
+`lib/openssl_lib/` holds `libssl.a` and `libcrypto.a`, and no other file the
+root happens to contain. A `-l` that resolves in the wasi-sdk sysroot ships
+nowhere. The wasi-sdk accounts for it, and `tools.wasi_sdk` states which one.
 
 Placement follows the Build tree's relative layout so that a reference recipe
-is readable against the bundle it ships with: a reader meeting `ext/extinit.o`
-on the link line finds it at `build/ext/extinit.o` without being told a
-mapping. A consumer working from the link recipe is expected to change
+is readable against the bundle it ships with: a reader meeting
+`enc/libenc.a` on the link line finds it at `build/enc/libenc.a` without being
+told a mapping. A consumer working from the link recipe is expected to change
 directory into `build/` rather than rewrite the relative tokens, which is what
 lets `-L.` and `-lruby-static` be inherited unchanged.
 
@@ -156,14 +191,15 @@ halfway.
 
 ## 3. Members
 
-**3.1** The install prefix, and four objects that live outside it:
-`ext/extinit.o`, `enc/libenc.a`, `enc/libtrans.a`, `libwasi_vfs.a`. The one
-property all four share is that the install prefix does not contain them.
+**3.1** The install prefix, and the files outside it that the link recipe
+names (2.1): objects and archives from the Build tree, the archives of each
+outside root, and `libwasi_vfs.a`. What they share is that the install prefix
+does not contain them.
 
-The install prefix alone cannot link a Ruby, which is why the bundle exists,
-and that claim rests on `ext/extinit.o` alone: it is generated at link time,
-never installed, and named by the link recipe. The other three are facts about
-the Build tree — see 3.2 and 3.3.
+The install prefix alone cannot link a Ruby, which is why the bundle exists.
+For `minimal` that rests on `dmyext.o` and `enc/encinit.o`, which are compiled
+for the link and never installed. For `full` it also rests on `ext/extinit.o`
+and the extension archives.
 
 **3.2** `libwasi_vfs.a` ships because CRuby's link line names it. A consumer
 may have good reason not to link it; that is the consumer's interpretation and
@@ -172,28 +208,31 @@ regardless, since the token is in the verbatim recipe, and a declared key
 whose file is absent is a bundle failing its own coverage rule to suit one
 downstream reading.
 
-**3.3** `enc/libenc.a` and `enc/libtrans.a` ship, and the reference link line
-for a `minimal` Build names neither, nor does `ext/extinit.o` reference them,
-and `make ruby` completes without them. **The member list is not the set of
-archives the link requires.** They are facts about the Build tree and
-provision for a `full` Build; whether any given downstream link needs them is
-for that link to establish.
+**3.3 The member list is what the Build linked, and a consumer decides what
+it links.** Every member is on the link recipe, because the recipe is the
+Build's own (6.1). It does not follow that a consumer must link all of them.
+That is the consumer's decision, against what it claims for its module.
 
-Whether the member list is constant across Builds is open. The table in 2.1
-was derived from one `minimal` Build, and a `full` link recipe may name
-objects outside the prefix that it does not hold.
+v2 shipped `enc/libenc.a` and `enc/libtrans.a` as "not named by the reference
+link line". That was true of the Relink v2 captured, not of the Build: both
+Profiles link `enc/encinit.o enc/libenc.a enc/libtrans.a` through `exts.mk`.
 
 ---
 
 ## 4. Build Manifest — `manifest.yml`
 
 ```yaml
-contract_version: 2
-build_name: 3.3-wasm32-unknown-icp-minimal
-fork_commit: <40-hex>
+contract_version: 3
+build_name: 3.3-wasm32-unknown-icp-full
+fork_commit: <40-hex>            # main: what was built
+release_commit: <40-hex>         # release: what cut the bundle
 capture: manual                  # or: workflow
 archive: prefix/lib/libruby-static.a
-transcript_cwd: /…/build/wasm32-unknown-icp/ruby-3.3-…-minimal
+transcript_cwd: /…/build/wasm32-unknown-icp/ruby-3.3-…-full
+extensions:                      # [] where the line names dmyext.o
+  - bigdecimal
+  - cgi/escape
+  # … 26 in all, in ext/extinit.c's order
 
 tools:
   wasi_sdk: "22.0"
@@ -207,16 +246,29 @@ path_keys:
   cc_wrapper:    { kind: token, value: /…/3.3/tool/wasm-clangw,     accounted: tools.cc_wrapper_sha256 }
   wasi_vfs:      { kind: token, value: /…/0.6.2/libwasi_vfs.a,      accounted: wasi-vfs/libwasi_vfs.a }
   wasm_opt:      { kind: token, value: /…/binaryen/bin/wasm-opt,    accounted: tools.binaryen }
+  openssl_lib:   { kind: root,  value: /…/openssl-3.2.0/opt/usr/local/lib, accounted: lib/openssl_lib }
+  yaml_lib:      { kind: root,  value: /…/yaml-0.2.5/opt/usr/local/lib,    accounted: lib/yaml_lib }
+  zlib_lib:      { kind: root,  value: /…/zlib-1.3.1/opt/usr/local/lib,    accounted: lib/zlib_lib }
 ```
+
+The last three exist only where the link recipe names outside roots (4.7);
+`minimal` has none.
 
 **4.1 Tool versions, never URLs or install methods.** A version is a fact
 about the Build; acquisition is a fact about the consuming machine, which the
 fork does not know.
 
-Only tools the Build actually ran appear. A tool a consumer needs for its own
-later stages is a fact about that consumer's pipeline, not about this Build,
-and the fork can only transcribe a number someone chose elsewhere — a field
-that looks like its neighbours while being different in kind.
+Only tools the Build or its Capture actually ran appear. A tool a consumer
+needs for its own later stages is a fact about that consumer's pipeline, not
+about this Build, and the fork can only transcribe a number someone chose
+elsewhere — a field that looks like its neighbours while being different in
+kind.
+
+The Capture's instruments get no fields of their own, because the tools above
+already state them. It reads objects and archives with
+`<wasi_sdk_path>/bin/llvm-nm`, which `tools.wasi_sdk` states, and `ruby`'s
+function names with the line's own `wasm-opt`, which `tools.binaryen` states.
+Any other `llvm-nm` or `wasm-opt` stops the capture (6.8).
 
 The three are not equally load-bearing. **wasi-sdk must match the archive** or
 CRuby fails inside `ruby_setup` naming nothing. Binaryen changes the module's
@@ -238,8 +290,8 @@ provenance that cannot be reproduced is not worth recording; stopping is the
 cheaper failure.
 
 **4.4 `build_name` is provenance and a check.** A consumer should fail when a
-resolved bundle's `build_name` disagrees with the Build it expects. `latest`
-moving to a different Build is a failure every assertion in section 6 passes
+resolved bundle's `build_name` disagrees with the Build it expects. A pin
+naming another Build's tag is a failure every assertion in section 6 passes
 and every hash survives.
 
 **4.5 `capture: workflow | manual`** records who invoked the extractor and the
@@ -261,6 +313,11 @@ matches nothing and is read by no assertion is a key in name only.
 
 6.0 reads it as the Build tree root, which is what it is.
 
+From v3 the link recipe is taken in a Capture copy of that tree (6.1), at
+another path. `transcript_cwd` still names the Build tree. The copy's path is
+provenance of nothing, since it is deleted afterwards, and a selected recipe
+that names it stops the capture: such a line depends on where the copy sat.
+
 **4.7 Path keys carry `kind`, `value` and `accounted`.** A path key declares
 what an absolute path in a reference recipe *is* — which of two paths sharing
 a prefix is a toolchain, which is a source checkout, which is a build product.
@@ -273,7 +330,10 @@ of three forms:
   not necessarily a version: 4.2 establishes that `cc_wrapper_sha256` is
   precisely not a version and is still a statement the bundle makes about that
   path.
-- **a bundle-relative member path** — the bundle carries it.
+- **a bundle-relative member path** — the bundle carries it. For a root key
+  outside the tree this is the directory `lib/<key>`, which resolves exactly:
+  the `hashes.txt` paths under it are precisely the archives the link recipe
+  resolves through that root (2.1).
 - **`null`** — the bundle accounts for it in neither way. The path exists on
   the Build machine and the bundle says nothing further about it.
 
@@ -305,6 +365,14 @@ checkout, a file the bundle carries. No single root is true of more than one
 of them, and collapsing them forces a consumer to re-split by path shape,
 which is reverse engineering the roots from the paths.
 
+A root key outside the tree is derived, never declared. Every `-L` root that
+resolves a `-l` on the link recipe becomes one, named by a rule rather than a
+table. Strip `/opt/usr/local/lib`, take the basename, drop a trailing
+`-<version>` that begins with a digit, and append `_lib`. So
+`…/openssl-3.2.0/opt/usr/local/lib` gives `openssl_lib`. The capture stops on a
+root of any other shape, on a root that resolves no `-l`, and on a name that
+collides with another key. The version stays in the key's `value`.
+
 **4.9 `contract_version` states the version of this document the bundle was
 cut under.** An integer, required, and never inferred.
 
@@ -322,6 +390,23 @@ to resolve it.
 It may not be published in the release body instead. 1.8 forbids a release
 body being the only place a fact about a bundle appears.
 
+**4.10 `extensions` lists what the Build linked as extensions.** It holds the
+second argument of each `init(…)` call in the Build tree's `ext/extinit.c`, in
+that file's order, with no name twice. It is `[]` where the link recipe names
+`dmyext.o`, because then there is no `ext/extinit.c`. The capture checks the
+list against the line and the binary (6.8).
+
+It states what was linked, not what the Profile asked for. Configure drops an
+extension it cannot build without saying so, as it drops `dbm`, `gdbm` and
+`racc/cparse` from `full`. A field recording the request would state
+something the Build did not do.
+
+**4.11 `release_commit` names the `release` commit that cut the bundle.**
+`fork_commit` names the `main` commit that was built. The workflow, the
+extractor and the checks that cut the bundle live on `release`, so a
+bundle's own provenance needs both. It requires a tracked-clean `release`
+checkout, for 4.3's reason.
+
 ---
 
 ## 5. Reference recipes
@@ -330,8 +415,9 @@ body being the only place a fact about a bundle appears.
 reproduce the Build's own link and compile decisions rather than reassembling
 them. No rewriting, no reformatting, no trimming.
 
-- **`link.raw.txt`** — the recipe producing `-o ruby`, followed by the
-  `wasm-opt` line after it.
+- **`link.raw.txt`** — the recipe producing `-o ruby` that the Build's own
+  driver issues, from `make -n build-ext` in a Capture copy (6.1), followed by
+  the `wasm-opt` line after it.
 - **`compile.raw.txt`** — the recipe producing `-o main.o`.
 
 `main.o` rather than `ext/extinit.o`: it is built from srcdir with the
@@ -381,15 +467,15 @@ first character of the word, where the character before it is one of `=` `,`
 name — one or more dashes followed by letters only.
 
 Without the anchor the rule is unusable rather than merely imprecise.
-`ext/extinit.o` is a word on every link recipe; its maximal `/`-initial
-substring is `/extinit.o`; no key covers that; and 6.2 would stop every
+`enc/libenc.a` is a word on every link recipe; its maximal `/`-initial
+substring is `/libenc.a`; no key covers that; and 6.2 would stop every
 capture ever taken. `-I.ext/include/wasm32-wasi` on the compile recipe fails
 the same way.
 
 The option-name clause separates `-I/opt/include`, where the path is the
 option's argument, from `-I.ext/include`, where there is no path at all. The
 discriminating character is the `.`, which an option name cannot contain and a
-relative prefix in these recipes always does. `ext/extinit.o` fails a
+relative prefix in these recipes always does. `enc/libenc.a` fails a
 different clause: it carries no leading dash, so nothing before its separator
 is an option name.
 
@@ -492,22 +578,50 @@ path gets shed quietly.
 
 ## 6. What the fork asserts before publishing
 
-**6.0 Preconditions on the Build tree.**
+**6.0 Preconditions on the Build tree.** The tree is as `rake build:<name>`
+left it. No `make` target is run in it before or during the capture, apart
+from the dry run of 6.1's compile row. v2's `make ruby` step was a Relink, and
+in `full` it rewrote `ext/extinit.c` to name no extension.
 
-- **`make ruby` has completed.** `ext/extinit.o` is generated at link time and
-  does not exist until it has, and a bundle cannot ship a member the Build
-  never produced. A printed recipe is not a completed link.
-- `<transcript_cwd>/ruby` exists and is newer than `main.o` and
-  `ext/extinit.o`.
-- The checkout is tracked-clean, per 4.3.
+Before the Capture copy is made:
+
+- `<transcript_cwd>/ruby` and `main.o` exist, and `ruby` is newer than
+  `main.o`;
+- the checkout is tracked-clean, per 4.3;
+- the copy's path, `<transcript_cwd>.capture-copy`, does not exist.
+
+Once the link recipe is selected:
+
+- `ruby` is newer than every file the recipe resolves, except the sysroot's.
+  That covers tree objects and archives, `libruby-static.a`, `libwasi_vfs.a`,
+  and each outside root's archives. Mtimes are read in the real tree. An
+  input newer than `ruby` means the binary did not come from the files the
+  bundle ships.
 
 **6.1 Selection, by stated pattern, each matching exactly once.**
 
 | Artifact | Pattern | Source |
 | --- | --- | --- |
-| link recipe | `-o ruby$` | `make -n ruby` |
-| `wasm-opt` line | `bin/wasm-opt ` | `make -n ruby` |
-| compile recipe | `-o main\.o ` | `make -n -W main.c main.o` |
+| link recipe | `-o ruby$` | `make -n build-ext`, in the Capture copy |
+| `wasm-opt` line | `bin/wasm-opt ` | the same transcript |
+| compile recipe | `-o main\.o ` | `make -n -W main.c main.o`, in the Build tree |
+
+**The link recipe is the line the Build's own driver issues.** The Build links
+through `exts.mk`, with arguments only the `build-ext` target supplies. So
+`make -n ruby` prints a Relink: another link than the Build ran.
+
+**`make -n build-ext` is not a dry run.** A recipe line that names `$(MAKE)`
+runs under `-n`, and CRuby's runs `extmk.rb`, which deletes
+`ext/extinit.{c,o}`. So it runs only in a **Capture copy**, made with
+`cp -a` and removed afterwards. Two checks hold the copy to the tree:
+
+- **fidelity:** the copy's `make -n -W main.c main.o` compile recipe equals
+  the tree's, byte for byte;
+- **untouched:** the sha256 of every object, archive, `ruby` and
+  `ext/extinit.c` in the real tree is the same before and after.
+
+Where either check fails, the copy is kept for diagnosis and the capture
+writes nothing.
 
 The link pattern is anchored because the `wasm-opt` line also contains
 `-o ruby`; unanchored it matches twice and stops a correct release. "Matches
@@ -531,6 +645,24 @@ published from another.
 Selecting by a rule that must match once is stating a fact. Selecting a line
 that looked right is a judgement, and judgement is the thing this boundary
 exists to keep out.
+
+**The link recipe is then read by a closed grammar, and every word is placed
+or the capture stops.** It reads left to right:
+
+- Words 0 and 1 are the compiler words: the `cc_wrapper` token, then
+  `<wasi_sdk_path>/bin/clang`.
+- `-o`, `-Xlinker` and `-z` take the next word as their argument. `-o`'s
+  argument is `ruby`.
+- `-L<dir>` is `.` or absolute.
+- `-l<name>` resolves as the linker resolves it: through every `-L` root in
+  line order, then the sysroot. One that resolves nowhere stops.
+- Any other word beginning `-` is a flag.
+- An absolute word is a declared token key.
+- A relative word ends in `.o` or `.a` and exists in the tree.
+- Anything else stops, including a quote or a backslash, and a bare word left
+  over by an option the grammar does not list.
+
+2.1's members and 4.7's derived root keys are what this reading yields.
 
 **6.2 Coverage and non-ambiguity, over embedded paths per 5.3.**
 
@@ -586,6 +718,11 @@ would see the symptom; this sees the cause. The producer can check one line.
 three `WASM_*_STACK_BUFFER_SIZE` values and the wasi-sdk path each appear in
 `CONFIG["configure_args"]`.
 
+The wasi-sdk path is the compile recipe's second word, which must be
+`<path>/bin/clang`; the first is the wrapper. A second word of any other form
+stops, and so does `<path>/bin/clang` anywhere else on the recipe. The path is
+read from a fixed position and is never searched for.
+
 Each value is checked in the key that carries it. CRuby's `configure.ac`
 appends the four defines to `CFLAGS` and `CPPFLAGS` itself, so they never pass
 through the arguments configure was given; the compile recipe carries each
@@ -606,6 +743,33 @@ by 1.4.
 
 Standard format because a consumer should be able to check both directions
 with tools nobody had to write.
+
+**6.8 The link recipe agrees with the Build it claims to describe.** Every
+other check compares one reading of the tree with another. This one compares
+the claim with the artifacts. Objects and archives are read with
+`<wasi_sdk_path>/bin/llvm-nm --defined-only`. `ruby` is read with the line's
+own `wasm-opt --print-function-map`, through its `name` section, because
+`llvm-nm` on a linked, optimised module lists only its exports.
+
+- **Initialisers.** Every `Init_` function in `ruby` is defined by a file the
+  recipe resolves. A weak definition counts, since CRuby's empty weak
+  `Init_extra_exts` is what links when nothing overrides it.
+- **Encodings.** `enc/libenc.a` is on the recipe if and only if
+  `Init_utf_16le` is in `ruby`.
+- **Extensions, one to one.**
+  - Each `init(Init_X, …)` in `ext/extinit.c` is defined, strongly, by
+    exactly one `ext/**/*.a` on the recipe.
+  - Each such archive defines exactly one of them.
+  - Each `Init_X` is in `ruby`.
+
+  The name is not the archive's path: `ext/cgi/escape/escape.a` defines
+  `Init_cgi_escape`.
+- **Exactly one of `dmyext.o` and `ext/extinit.o`** is on the recipe. With
+  `dmyext.o` there is no `ext/extinit.c` and no extension archive. With
+  `ext/extinit.o` there is an `ext/extinit.c`.
+
+A `ruby` with no `name` section, or an input whose symbol table could not be
+read, stops the capture. It is not an empty list that agrees with everything.
 
 **6.7 No assertion in this section is satisfied by a pipeline's exit status.**
 A `grep` after a `make` reports the `grep`, and a `sha256sum -c` piped into a
@@ -642,7 +806,11 @@ it either. The manifest states what `wasm-opt --version` printed; a consumer
 parsing a fetchable tag out of that line is interpreting, and should fail
 loudly rather than fetch the wrong Binaryen.
 
-**7.5 The member list is not a link requirement** — 3.3.
+**7.5 The member list is what the Build linked, not an instruction** — 3.3.
+Recheck `build/` and each `lib/<key>/` against `link.raw.txt` yourself: the
+rule is in 2.1, and a bundle holds everything it reads except the sysroot's
+listing. A `-l` that resolves nowhere in the bundle can only be presumed to be
+the sysroot's, from the bundle alone.
 
 **7.6 Both recipes are evidence, and neither carries a claim about
 applicability** — 5.2. The compile recipe's flags are CRuby's for CRuby's
@@ -675,6 +843,54 @@ consumer implementing more than one version should say which it implements; a
 consumer implementing one should refuse the rest rather than guess.
 
 ---
+
+## Changes from v2
+
+v2 was frozen at `release` commit `53a40b1`, with one bundle cut under it.
+v3's batch was closed on the evidence capture of `full` (ADR-0049), and its
+text follows ADR-0068 and ADR-0069.
+
+**The link recipe is the Build's own (5.1, 6.0, 6.1; ADR-0068).**
+- v2 took it from `make -n ruby`, after a `make ruby` step. Both were a Relink,
+  for both Profiles. v2's `minimal` recipe named `ext/extinit.o` and no `enc/`
+  object, where the Build linked `dmyext.o` and `enc/encinit.o enc/libenc.a
+  enc/libtrans.a`.
+- In `full`, the step rewrote `ext/extinit.c` to name no extension.
+- v3 takes the line from `make -n build-ext` in a Capture copy, with no `make`
+  step, and checks it against the binary (6.8).
+
+**Members follow from the line (2.1, 3.1–3.3, 4.7; ADR-0069).** v2's fixed
+table of four members was what one `minimal` Relink gave:
+
+| Path in bundle | Named by the v2 link recipe |
+| --- | --- |
+| `build/libruby-static.a` | yes, via `-L.` and `-lruby-static` |
+| `build/ext/extinit.o` | yes |
+| `build/enc/libenc.a` | no |
+| `build/enc/libtrans.a` | no |
+
+v3 states the rule instead. Outside roots become derived root keys, with
+`lib/<key>/` holding exactly the resolved archives.
+
+**New manifest fields:** `release_commit` (4.11; ADR-0047) and `extensions`
+(4.10). The batch also listed a `tools.llvm_nm`. It is not added: the
+Capture's `llvm-nm` is the wasi-sdk's own and is pinned by refusal (4.1).
+
+**6.5 reads the wasi-sdk path from the compile recipe's second word.** v2
+searched the recipe for the one word of that form.
+
+**Publication clauses (1.3, 1.4, 1.6, 1.7)** now state what the instruments
+already enforced under v2:
+- the tag date is `published_at`'s UTC date (ADR-0042);
+- the sibling's exact `sha256sum` form;
+- the frozen Latest pointer (ADR-0048);
+- assets are never replaced, and a spent tag name stays spent (ADR-0050).
+
+**`docs/release-bundle-contract.md` is deleted.** It was a stale copy headed
+"Version 1". This file is the contract.
+
+Nothing in 5.3–5.6 changed. A path trace extracted under v2 is the trace v3
+extracts from the same recipe.
 
 ## Changes from v1
 
