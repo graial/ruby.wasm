@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "time"
 require_relative "sibling"
 
 module RubyWasm
@@ -28,10 +29,28 @@ module RubyWasm
 
       Refusal = Struct.new(:clause, :message)
 
+      COMMIT = /\A[0-9a-f]{40}\z/
+
+      # ADR-0042: today is GitHub's today. `response` is the whole of `gh api
+      # -i` output. The Date header of its head is read, and nil comes back if
+      # there is none or it is not an HTTP date. The caller stops on nil: a
+      # local clock is what this exists to stop trusting, so it is no fallback.
+      def self.github_time(response)
+        head = response.split(/\r?\n\r?\n/, 2).first.to_s
+        value = head[/^Date:[ \t]*(.+?)\r?$/i, 1]
+        return nil if value.nil?
+
+        begin
+          Time.httpdate(value).utc
+        rescue ArgumentError
+          nil
+        end
+      end
+
       # build_name: manifest.yml's build_name, read from inside the tarball;
       #   nil when it could not be read.
-      # today: the UTC calendar date the preflight runs, as YYYYMMDD. Passed in
-      #   rather than read from a clock, so the date refusal has a spec.
+      # today: the UTC calendar date on GitHub's clock (.github_time), as
+      #   YYYYMMDD. Passed in rather than read, so the date refusal has a spec.
       # existing_tags: every tag name on the remote.
       # archive_members: the top-level entries inside the tarball (1.5).
       # sibling: the .sha256 sibling's whole contents, unparsed, so that its
@@ -40,6 +59,13 @@ module RubyWasm
       # repository_status: the status GET /repos/{owner}/{repo} answered.
       # immutability: [status, parsed body] from
       #   GET /repos/{owner}/{repo}/immutable-releases (ADR-0050).
+      # release_commit: manifest.yml's release_commit, read from inside the
+      #   tarball; nil when it could not be read.
+      # on_release: whether release_commit is on the remote's release branch;
+      #   nil when that could not be determined.
+      # frozen_latest_tag: the tag the latest pointer is frozen on (ADR-0048),
+      #   as configured for this repository; nil or empty when it is not.
+      # latest_tag: the tag /releases/latest resolves to now; nil if unread.
       def initialize(
         tag:,
         build_name:,
@@ -50,7 +76,11 @@ module RubyWasm
         sibling: nil,
         actual_sha256: nil,
         repository_status: nil,
-        immutability: nil
+        immutability: nil,
+        release_commit: nil,
+        on_release: nil,
+        frozen_latest_tag: nil,
+        latest_tag: nil
       )
         @tag = tag
         @build_name = build_name
@@ -62,6 +92,10 @@ module RubyWasm
         @repository_status = repository_status
         @immutability = immutability
         @actual_sha256 = actual_sha256
+        @release_commit = release_commit
+        @on_release = on_release
+        @frozen_latest_tag = frozen_latest_tag
+        @latest_tag = latest_tag
       end
 
       def refusals
@@ -111,6 +145,8 @@ module RubyWasm
         end
 
         out.concat(asset_refusals(match))
+        out.concat(target_refusals)
+        out.concat(pointer_refusals)
         out
       end
 
@@ -148,6 +184,67 @@ module RubyWasm
       end
 
       private
+
+      # ADR-0047: the tag will target the commit that cut this bundle, which
+      # the bundle states. It must be a commit release actually carries.
+      def target_refusals
+        commit = @release_commit
+        if commit.nil? || !COMMIT.match?(commit)
+          return [
+            Refusal.new(
+              "ADR-0047",
+              "the tarball's manifest.yml gives release_commit #{commit.inspect}, " \
+              "so the tag has no commit to target"
+            )
+          ]
+        end
+
+        case @on_release
+        when true
+          []
+        when false
+          [
+            Refusal.new(
+              "ADR-0047",
+              "release_commit #{commit} is not on release; a tag targets a release " \
+              "commit that cut its bundle"
+            )
+          ]
+        else
+          [
+            Refusal.new(
+              "ADR-0047",
+              "whether release_commit #{commit} is on release could not be determined"
+            )
+          ]
+        end
+      end
+
+      # ADR-0048: the pointer's frozen tag is configured, and the pointer is on
+      # it now, so a wrong setting stops here and not after a name is spent.
+      def pointer_refusals
+        frozen = @frozen_latest_tag
+        if frozen.nil? || frozen.empty?
+          return [
+            Refusal.new(
+              "1.6",
+              "FROZEN_LATEST_TAG is not set, so the postflight could not check " \
+              "the latest pointer (ADR-0048)"
+            )
+          ]
+        end
+
+        return [] if @latest_tag == frozen
+
+        found = @latest_tag.nil? ? "names no tag" : "resolves to #{@latest_tag}"
+        [
+          Refusal.new(
+            "1.6",
+            "/releases/latest #{found}, and FROZEN_LATEST_TAG is #{frozen} " \
+            "(ADR-0048). Either the setting is wrong or the pointer has moved"
+          )
+        ]
+      end
 
       def asset_refusals(match)
         # @type var out: Array[Refusal]

@@ -8,7 +8,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
   P_TAG = "#{P_BUILD}-20261014.1"
   P_ASSET = "ruby-#{P_BUILD}-lib-20261014.1.tar.gz"
   P_DIGEST = "c" * 64
-  P_TIP = "d" * 40
+  P_COMMIT = "d" * 40
+  P_FROZEN = "some-build-20260919.1"
 
   # Shaped like GitHub's release object: only the fields read here, plus
   # created_at, which is present in every real response and must never be read.
@@ -29,9 +30,10 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       **{
         tag: P_TAG,
         release: described_class.release_from(json, tag: P_TAG),
-        latest_tag: described_class::FROZEN_TAG,
-        tag_target: P_TIP,
-        release_tip: P_TIP,
+        frozen_tag: P_FROZEN,
+        latest_tag: P_FROZEN,
+        tag_target: P_COMMIT,
+        release_commit: P_COMMIT,
         local_sha256: P_DIGEST,
         sibling: RubyWasm::ReleaseBundle::Sibling.line(P_DIGEST, P_ASSET),
         downloaded_sha256: P_DIGEST
@@ -159,8 +161,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
     end
 
     it "does not refuse the frozen tag, the one release ADR-0050 leaves mutable" do
-      frozen = described_class::FROZEN_TAG
-      asset = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260919.1.tar.gz"
+      frozen = P_FROZEN
+      asset = "ruby-some-build-lib-20260919.1.tar.gz"
       json = release_json(
         "tag_name" => frozen,
         "immutable" => false,
@@ -170,9 +172,10 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       p = described_class.new(
         tag: frozen,
         release: described_class.release_from(json, tag: frozen),
+        frozen_tag: P_FROZEN,
         latest_tag: frozen,
-        tag_target: P_TIP,
-        release_tip: P_TIP,
+        tag_target: P_COMMIT,
+        release_commit: P_COMMIT,
         local_sha256: P_DIGEST,
         sibling: RubyWasm::ReleaseBundle::Sibling.line(P_DIGEST, asset),
         downloaded_sha256: P_DIGEST
@@ -182,8 +185,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
     end
 
     it "gives the note without refusals having been asked for first" do
-      frozen = described_class::FROZEN_TAG
-      asset = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260919.1.tar.gz"
+      frozen = P_FROZEN
+      asset = "ruby-some-build-lib-20260919.1.tar.gz"
       json = release_json(
         "tag_name" => frozen,
         "immutable" => false,
@@ -193,9 +196,10 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       p = described_class.new(
         tag: frozen,
         release: described_class.release_from(json, tag: frozen),
+        frozen_tag: P_FROZEN,
         latest_tag: frozen,
-        tag_target: P_TIP,
-        release_tip: P_TIP,
+        tag_target: P_COMMIT,
+        release_commit: P_COMMIT,
         local_sha256: P_DIGEST,
         sibling: RubyWasm::ReleaseBundle::Sibling.line(P_DIGEST, asset),
         downloaded_sha256: P_DIGEST
@@ -205,8 +209,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
 
     it "exempts that tag by its exact name only" do
       # Same Build and date, next ordinal: a later release, and not exempt.
-      tag = "3.3-wasm32-unknown-icp-minimal-20260919.2"
-      asset = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260919.2.tar.gz"
+      tag = "some-build-20260919.2"
+      asset = "ruby-some-build-lib-20260919.2.tar.gz"
       json = release_json(
         "tag_name" => tag,
         "immutable" => false,
@@ -216,9 +220,10 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       p = described_class.new(
         tag: tag,
         release: described_class.release_from(json, tag: tag),
-        latest_tag: described_class::FROZEN_TAG,
-        tag_target: P_TIP,
-        release_tip: P_TIP,
+        frozen_tag: P_FROZEN,
+        latest_tag: P_FROZEN,
+        tag_target: P_COMMIT,
+        release_commit: P_COMMIT,
         local_sha256: P_DIGEST,
         sibling: RubyWasm::ReleaseBundle::Sibling.line(P_DIGEST, asset),
         downloaded_sha256: P_DIGEST
@@ -232,7 +237,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
       r = refusals(latest_tag: P_TAG)
       expect(r.map(&:clause)).to eq(["1.6"])
       expect(r.first.fix).to eq(:in_place)
-      expect(r.first.message).to include("gh release edit #{described_class::FROZEN_TAG} --latest")
+      expect(r.first.message).to include("gh release edit #{P_FROZEN} --latest")
     end
 
     it "refuses when the redirect named no tag, rather than skipping the check" do
@@ -240,7 +245,11 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
     end
   end
 
-  describe "ADR-0047 — the tag targets release's tip" do
+  describe "ADR-0047 — the tag targets the bundle's release_commit" do
+    it "passes on the manifest's commit, whatever release's tip has become" do
+      expect(postflight(tag_target: "f" * 40, release_commit: "f" * 40)).to be_pass
+    end
+
     it "refuses a tag on another commit, as needing a new tag" do
       r = refusals(tag_target: "e" * 40)
       expect(r.map(&:clause)).to eq(["ADR-0047"])
@@ -249,7 +258,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Postflight do
 
     it "refuses when either commit could not be read" do
       expect(clauses(tag_target: nil)).to eq(["ADR-0047"])
-      expect(clauses(release_tip: nil)).to eq(["ADR-0047"])
+      expect(clauses(release_commit: nil)).to eq(["ADR-0047"])
     end
   end
 

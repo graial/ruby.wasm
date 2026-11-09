@@ -28,10 +28,6 @@ module RubyWasm
     # local tarball, and returns what is wrong. Everything a refusal depends on
     # is a constructor argument, so every refusal is reachable from a spec.
     class Postflight
-      # ADR-0048: the latest pointer never moves from here. ADR-0050: the one
-      # release left mutable, published before immutability was enabled.
-      FROZEN_TAG = "3.3-wasm32-unknown-icp-minimal-20260919.1"
-
       Refusal = Struct.new(:clause, :fix, :message)
 
       # What was read from the release object. A plain class rather than a
@@ -120,26 +116,32 @@ module RubyWasm
       # tag: the tag just published.
       # release: its Release, from .release_from.
       # latest_tag: the tag /releases/latest redirects to; nil when it named none.
-      # tag_target / release_tip: the commit the tag resolves to and the remote
-      #   release branch's head; nil when either could not be read.
+      # frozen_tag: the tag the latest pointer never moves from (ADR-0048), and
+      #   the one release left mutable, published before immutability was
+      #   enabled (ADR-0050). A fact about one repository's publications, so it
+      #   is handed in and this class names no tag.
+      # tag_target / release_commit: the commit the tag resolves to and the
+      #   manifest's release_commit (ADR-0047).
       # local_sha256: the tarball the preflight checked, on this machine.
       # sibling: the published .sha256 asset's bytes, unparsed.
       # downloaded_sha256: the published tarball's digest, downloaded.
       def initialize(
         tag:,
         release:,
+        frozen_tag:,
         latest_tag:,
         tag_target:,
-        release_tip:,
+        release_commit:,
         local_sha256:,
         sibling:,
         downloaded_sha256:
       )
         @tag = tag
         @release = release
+        @frozen_tag = frozen_tag
         @latest_tag = latest_tag
         @tag_target = tag_target
-        @release_tip = release_tip
+        @release_commit = release_commit
         @local_sha256 = local_sha256
         @sibling = sibling
         @downloaded_sha256 = downloaded_sha256
@@ -237,7 +239,7 @@ module RubyWasm
         end
 
         if !release.immutable
-          if @tag == FROZEN_TAG
+          if @tag == @frozen_tag
             @notes << "#{@tag} is not immutable: it was published before immutable " \
                       "releases were enabled, and ADR-0050 leaves it so. Consumers " \
                       "pinning it must keep re-fetching its sibling."
@@ -255,27 +257,27 @@ module RubyWasm
       end
 
       def latest_refusals
-        return [] if @latest_tag == FROZEN_TAG
+        return [] if @latest_tag == @frozen_tag
 
         found = @latest_tag.nil? ? "names no tag" : "resolves to #{@latest_tag}"
         [
           Refusal.new(
             "1.6", :in_place,
-            "/releases/latest #{found}; it never moves from #{FROZEN_TAG} (ADR-0048). " \
-            "Fix: gh release edit #{FROZEN_TAG} --latest"
+            "/releases/latest #{found}; it never moves from #{@frozen_tag} (ADR-0048). " \
+            "Fix: gh release edit #{@frozen_tag} --latest"
           )
         ]
       end
 
       def target_refusals
-        return [] if @tag_target && @tag_target == @release_tip
+        return [] if @tag_target && @tag_target == @release_commit
 
         [
           Refusal.new(
             "ADR-0047", :new_tag,
-            "the tag resolves to #{@tag_target || "(unreadable)"}, release's tip is " \
-            "#{@release_tip || "(unreadable)"}; a tag targets the release commit " \
-            "that cut its bundle. #{NEW_TAG}"
+            "the tag resolves to #{@tag_target || "(unreadable)"}, the bundle's " \
+            "release_commit is #{@release_commit || "(unreadable)"}; a tag targets " \
+            "the release commit that cut its bundle. #{NEW_TAG}"
           )
         ]
       end

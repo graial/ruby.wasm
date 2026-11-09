@@ -10,6 +10,8 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
   STEM = "ruby-3.3-wasm32-unknown-icp-minimal-lib-20260911.1"
   DIGEST = "a" * 64
   SIBLING = "#{DIGEST}  #{ASSET}\n"
+  COMMIT_ID = "b" * 40
+  FROZEN = "some-build-20260919.1"
 
   def preflight(**overrides)
     described_class.new(
@@ -23,7 +25,11 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
         sibling: SIBLING,
         repository_status: 200,
         immutability: [200, { "enabled" => true, "enforced_by_owner" => false }],
-        actual_sha256: DIGEST
+        actual_sha256: DIGEST,
+        release_commit: COMMIT_ID,
+        on_release: true,
+        frozen_latest_tag: FROZEN,
+        latest_tag: FROZEN
       }.merge(overrides)
     )
   end
@@ -42,6 +48,66 @@ RSpec.describe RubyWasm::ReleaseBundle::Preflight do
       # not-a-collision case is the one that would otherwise go untested until
       # the day it stops being true.
       expect(preflight(existing_tags: ["#{BUILD}-20260901.1", "other-20260911.1"])).to be_pass
+    end
+  end
+
+  describe ".github_time — today is GitHub's today (ADR-0042)" do
+    def response(head)
+      "#{head}\r\n\r\n{\"date\": \"Mon, 01 Jan 1990 00:00:00 GMT\"}"
+    end
+
+    it "reads the Date header, in UTC" do
+      t = described_class.github_time(response("HTTP/2.0 200 OK\r\nDate: Sun, 08 Nov 2026 16:58:12 GMT\r\nServer: github.com"))
+      expect(t.strftime("%Y%m%d %H:%M")).to eq("20261108 16:58")
+      expect(t).to be_utc
+    end
+
+    it "takes the date from a response that used LF line ends and a lower-case name" do
+      t = described_class.github_time("HTTP/1.1 200 OK\ndate: Sun, 08 Nov 2026 16:58:12 GMT\n\n{}")
+      expect(t&.strftime("%Y%m%d")).to eq("20261108")
+    end
+
+    it "gives nil when there is no Date header, and never reads the body" do
+      expect(described_class.github_time(response("HTTP/2.0 200 OK\r\nServer: github.com"))).to be_nil
+    end
+
+    it "gives nil for a Date header that is not an HTTP date" do
+      expect(described_class.github_time(response("HTTP/2.0 200 OK\r\nDate: yesterday"))).to be_nil
+    end
+  end
+
+  describe "ADR-0047 — the tag's commit is the bundle's release_commit" do
+    it "refuses when the manifest gave none" do
+      expect(clauses(release_commit: nil)).to eq(["ADR-0047"])
+    end
+
+    it "refuses a release_commit that is not a full commit id" do
+      expect(clauses(release_commit: "6e21f4f")).to eq(["ADR-0047"])
+    end
+
+    it "refuses a commit release does not carry" do
+      expect(clauses(on_release: false)).to eq(["ADR-0047"])
+    end
+
+    it "refuses when it could not be determined, and says so" do
+      r = preflight(on_release: nil).refusals
+      expect(r.map(&:clause)).to eq(["ADR-0047"])
+      expect(r.first.message).to include("could not be determined")
+    end
+  end
+
+  describe "1.6 — the latest pointer's frozen tag (ADR-0048)" do
+    it "refuses when FROZEN_LATEST_TAG is not set" do
+      expect(clauses(frozen_latest_tag: nil)).to eq(["1.6"])
+      expect(clauses(frozen_latest_tag: "")).to eq(["1.6"])
+    end
+
+    it "refuses when the pointer is somewhere else" do
+      expect(clauses(latest_tag: "other-20260101.1")).to eq(["1.6"])
+    end
+
+    it "refuses when the pointer could not be read" do
+      expect(clauses(latest_tag: nil)).to eq(["1.6"])
     end
   end
 

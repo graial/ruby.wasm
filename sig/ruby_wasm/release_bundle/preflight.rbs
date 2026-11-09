@@ -2,6 +2,9 @@ module RubyWasm
   module ReleaseBundle
     class Preflight
       TAG: Regexp
+      COMMIT: Regexp
+
+      def self.github_time: (String response) -> Time?
 
       class Refusal < Struct[untyped]
         attr_accessor clause: String
@@ -18,6 +21,10 @@ module RubyWasm
       @repository_status: Integer?
       @immutability: [Integer, untyped]?
       @actual_sha256: String?
+      @release_commit: String?
+      @on_release: bool?
+      @frozen_latest_tag: String?
+      @latest_tag: String?
 
       def initialize: (
         tag: String,
@@ -29,7 +36,11 @@ module RubyWasm
         ?sibling: String?,
         ?actual_sha256: String?,
         ?repository_status: Integer?,
-        ?immutability: [Integer, untyped]?
+        ?immutability: [Integer, untyped]?,
+        ?release_commit: String?,
+        ?on_release: bool?,
+        ?frozen_latest_tag: String?,
+        ?latest_tag: String?
       ) -> void
 
       def refusals: () -> Array[Refusal]
@@ -43,6 +54,10 @@ module RubyWasm
       def self.stem_for: (String asset_name) -> String
 
       private
+
+      def target_refusals: () -> Array[Refusal]
+
+      def pointer_refusals: () -> Array[Refusal]
 
       def asset_refusals: (MatchData match) -> Array[Refusal]
 

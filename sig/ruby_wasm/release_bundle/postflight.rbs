@@ -1,8 +1,6 @@
 module RubyWasm
   module ReleaseBundle
     class Postflight
-      FROZEN_TAG: String
-
       NEW_TAG: String
 
       class Refusal < Struct[untyped]
@@ -36,9 +34,10 @@ module RubyWasm
 
       @tag: String
       @release: Release
+      @frozen_tag: String
       @latest_tag: String?
       @tag_target: String?
-      @release_tip: String?
+      @release_commit: String?
       @local_sha256: String
       @sibling: String
       @downloaded_sha256: String
@@ -49,9 +48,10 @@ module RubyWasm
       def initialize: (
         tag: String,
         release: Release,
+        frozen_tag: String,
         latest_tag: String?,
         tag_target: String?,
-        release_tip: String?,
+        release_commit: String?,
         local_sha256: String,
         sibling: String,
         downloaded_sha256: String

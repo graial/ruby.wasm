@@ -5,7 +5,7 @@
 # after `gh release create`, and names the fix for each refusal.
 #
 #   bin/postflight-release <tag> <asset-directory> [remote]
-#   bin/postflight-release 3.3-wasm32-unknown-icp-minimal-20260919.1 ./out
+#   FROZEN_LATEST_TAG=<tag> bin/postflight-release <build-name>-<YYYYMMDD>.<ordinal> ./out
 #
 # Exit 0: nothing refused. Exit 1: refusals, each marked [in place] or
 # [new tag]. Exit 2: something could not be examined. That is neither a pass
@@ -20,7 +20,9 @@
 #   - the release object, through `gh api` with the operator's token
 #     (published_at and immutable exist only in the API);
 #   - the /releases/latest redirect, unauthenticated;
-#   - the tag's commit and release's tip, through `git ls-remote`;
+#   - the tag's commit, through `git ls-remote`;
+#   - release_commit, from the local tarball's own manifest.yml;
+#   - FROZEN_LATEST_TAG, the tag this repository's latest pointer is frozen on;
 #   - the published sibling and tarball, from the download host, as a consumer
 #     fetches them;
 #   - the local tarball.
@@ -31,6 +33,7 @@ require "json"
 require "net/http"
 require "open3"
 require "uri"
+require "yaml"
 require_relative "../lib/ruby_wasm/release_bundle/postflight"
 
 # Notes go to stdout and refusals to stderr; unbuffered, so they interleave in
@@ -73,6 +76,22 @@ local_path = File.join(dir, asset)
 unexamined("no #{asset} in #{dir}; the local tarball is one of the three digests") unless File.exist?(local_path)
 local_sha256 = Digest::SHA256.file(local_path).hexdigest
 
+frozen_tag = ENV["FROZEN_LATEST_TAG"].to_s
+unexamined("FROZEN_LATEST_TAG is not set (ADR-0048)") if frozen_tag.empty?
+
+# ADR-0047: the commit the tag must target is the one the bundle states.
+manifest_member = "#{Preflight.stem_for(asset)}/manifest.yml"
+manifest =
+  begin
+    YAML.safe_load(run("tar", "xzOf", local_path, manifest_member))
+  rescue Psych::Exception => e
+    unexamined("#{manifest_member} is not YAML: #{e.message}")
+  end
+release_commit = manifest.is_a?(Hash) ? manifest["release_commit"] : nil
+unless release_commit.is_a?(String) && Preflight::COMMIT.match?(release_commit)
+  unexamined("#{manifest_member} gives release_commit #{release_commit.inspect}")
+end
+
 # The release object. gh exits non-zero on a rate limit or a 404; either way
 # nothing was examined.
 body = run("gh", "api", "repos/#{slug}/releases/tags/#{tag}")
@@ -114,7 +133,6 @@ latest_tag =
 tag_lines = run("git", "ls-remote", remote, "refs/tags/#{tag}", "refs/tags/#{tag}^{}").lines
 peeled = tag_lines.find { |l| l.end_with?("^{}\n") } || tag_lines.first
 tag_target = peeled&.split("\t")&.first
-release_tip = run("git", "ls-remote", remote, "refs/heads/release").split("\t").first
 
 base = "https://github.com/#{slug}/releases/download/#{URI.encode_www_form_component(tag)}"
 sibling = +""
@@ -128,9 +146,10 @@ postflight =
   Postflight.new(
     tag: tag,
     release: release,
+    frozen_tag: frozen_tag,
     latest_tag: latest_tag,
     tag_target: tag_target,
-    release_tip: release_tip,
+    release_commit: release_commit,
     local_sha256: local_sha256,
     sibling: sibling,
     downloaded_sha256: downloaded_sha256
@@ -149,6 +168,6 @@ end
 puts "OK  #{tag}"
 puts "    published #{release.published_at}, immutable #{release.immutable}"
 puts "    latest pointer #{latest_tag}"
-puts "    tag and release's tip #{tag_target}"
+puts "    tag and release_commit #{tag_target}"
 puts "    #{asset}"
 puts "      local, sibling and download all #{downloaded_sha256}"
