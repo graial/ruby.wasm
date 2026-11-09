@@ -19,8 +19,19 @@ RSpec.describe RubyWasm::ReleaseBundle::Members do
     [V3Fixtures.link_line(profile), keys, listed]
   end
 
-  def check(line, keys, listed, sysroot: V3Fixtures::SYSROOT)
-    described_class.check(link_line: line, path_keys: keys, listed: listed, sysroot_archives: sysroot)
+  # What the producer writes: every -l the line's classification put in the
+  # sysroot, here read off the line by what cannot be anywhere in a bundle.
+  IN_BUNDLE = %w[ruby-static ssl crypto yaml z].freeze
+
+  def stated(line)
+    line.split(" ").grep(/\A-l./).map { |w| w.delete_prefix("-l") }.uniq - IN_BUNDLE
+  end
+
+  def check(line, keys, listed, sysroot: V3Fixtures::SYSROOT, libraries: stated(line))
+    described_class.check(
+      link_line: line, path_keys: keys, listed: listed,
+      sysroot_libraries: libraries, sysroot_archives: sysroot
+    )
   end
 
   def messages(r) = r.refusals.map(&:message)
@@ -30,10 +41,14 @@ RSpec.describe RubyWasm::ReleaseBundle::Members do
       expect(messages(check(*bundle(p)))).to be_empty
     end
 
-    it "#{p}: passes from the bundle alone, noting the -l it can only presume are the sysroot's" do
-      r = check(*bundle(p), sysroot: nil)
-      expect(messages(r)).to be_empty
-      expect(r.notes.join("\n")).to include("-lm resolves to nothing in the bundle")
+    it "#{p}: passes from the bundle alone, on the manifest's sysroot_libraries" do
+      expect(messages(check(*bundle(p), sysroot: nil))).to be_empty
+    end
+
+    it "#{p}: the producer's own classification gives those names, seven of them" do
+      line, = bundle(p)
+      expect(V3Fixtures.classify(p).sysroot).to eq(stated(line))
+      expect(stated(line).length).to eq(7)
     end
   end
 
@@ -51,11 +66,10 @@ RSpec.describe RubyWasm::ReleaseBundle::Members do
       expect(out).to include("-lcrypto resolves neither in the bundle nor in the sysroot")
     end
 
-    it "cannot see that gap from the bundle alone, and says so as a presumption, not a pass" do
+    it "sees that gap from the bundle alone: the name is not one the manifest says is the sysroot's" do
       line, keys, listed = bundle("full")
       r = check(line, keys, listed - ["lib/openssl_lib/libcrypto.a"], sysroot: nil)
-      expect(messages(r)).to be_empty
-      expect(r.notes.join).to include("-lcrypto resolves to nothing in the bundle")
+      expect(r.refusals.map(&:clause)).to include("4.12")
     end
 
     it "refuses a lib/<key>/ holding an archive the line does not resolve there" do
@@ -78,6 +92,44 @@ RSpec.describe RubyWasm::ReleaseBundle::Members do
     it "refuses a file under lib/ that no root accounts for" do
       line, keys, listed = bundle("minimal")
       expect(messages(check(line, keys, listed + ["lib/stray/libx.a"])).join).to include("lib/stray/libx.a")
+    end
+  end
+
+  describe "4.12 — sysroot_libraries is exactly what resolves nowhere in the bundle" do
+    it "refuses a -l resolving nowhere that the list omits" do
+      line, keys, listed = bundle("minimal")
+      r = check(line, keys, listed, sysroot: nil, libraries: stated(line) - ["m"])
+      expect(r.refusals.map(&:clause)).to eq(["4.12"])
+    end
+
+    it "refuses a listed name the line does not have" do
+      line, keys, listed = bundle("minimal")
+      r = check(line, keys, listed, sysroot: nil, libraries: stated(line) + ["pthread"])
+      expect(r.refusals.map(&:clause)).to eq(["4.12"])
+    end
+
+    it "refuses a listed name that resolves in the bundle" do
+      line, keys, listed = bundle("full")
+      r = check(line, keys, listed, sysroot: nil, libraries: stated(line) + ["crypto"])
+      expect(r.refusals.map(&:clause)).to eq(["4.12"])
+    end
+
+    it "refuses the right names in another order" do
+      line, keys, listed = bundle("minimal")
+      r = check(line, keys, listed, sysroot: nil, libraries: stated(line).reverse)
+      expect(r.refusals.map(&:clause)).to eq(["4.12"])
+    end
+
+    it "refuses a field that is not a list" do
+      line, keys, listed = bundle("minimal")
+      r = check(line, keys, listed, sysroot: nil, libraries: nil)
+      expect(r.refusals.map(&:clause)).to eq(["4.12"])
+    end
+
+    it "still has the producer's own listing refuse a listed name the sysroot lacks" do
+      line, keys, listed = bundle("minimal")
+      r = check(line, keys, listed, sysroot: V3Fixtures::SYSROOT - ["libm.a"])
+      expect(r.refusals.map(&:clause)).to eq(["4.7"])
     end
   end
 

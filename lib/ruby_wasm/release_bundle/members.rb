@@ -5,14 +5,12 @@ module RubyWasm
     # Contract v3 2.1 and 4.7, checked from a bundle alone: build/ and each
     # lib/<key>/ hold exactly what the link recipe names (ADR-0069).
     #
-    # It reads link.raw.txt's first line, manifest path_keys and hashes.txt's
-    # paths, which is everything a downloaded bundle has. The producer's
-    # capture also looked in the sysroot. A bundle-only reader can only infer
-    # that a -l resolving nowhere in the bundle is the sysroot's, and says so as
-    # a note, not a pass.
+    # It reads link.raw.txt's first line, manifest path_keys,
+    # manifest sysroot_libraries and hashes.txt's paths, which is everything a
+    # downloaded bundle has. The producer also looked in the sysroot itself.
     module Members
       Refusal = Struct.new(:clause, :message)
-      Result = Struct.new(:refusals, :notes)
+      Result = Struct.new(:refusals)
 
       MEMBER = /\.(o|a)\z/
       TAKES_ARGUMENT = %w[-o -Xlinker -z].freeze
@@ -20,16 +18,14 @@ module RubyWasm
       # link_line: link.raw.txt's first line, without "\n".
       # path_keys: manifest path_keys, name => { "kind", "value", "accounted" }.
       # listed: the paths in hashes.txt.
+      # sysroot_libraries: manifest sysroot_libraries (4.12): exactly the -l
+      #   names, in line order, that resolve nowhere in the bundle.
       # sysroot_archives: the producer's listing of the wasi-sdk sysroot, or
-      #   nil for a reader holding only the bundle. With it, a -l that resolves
-      #   neither in the bundle nor in the sysroot is refused: an archive the
-      #   assembler left out of lib/<key>/. Without it, that same -l can only be
-      #   noted as presumed sysroot, which is why the producer runs it with.
-      def self.check(link_line:, path_keys:, listed:, sysroot_archives: nil)
+      #   nil for a reader without one. With it, each of those names must also
+      #   resolve there.
+      def self.check(link_line:, path_keys:, listed:, sysroot_libraries:, sysroot_archives: nil)
         # @type var out: Array[Refusal]
         out = []
-        # @type var notes: Array[String]
-        notes = []
         have = listed.to_h { |p| [p, true] }
         words = link_line.split(" ")
 
@@ -73,16 +69,27 @@ module RubyWasm
         # plus the archive -lruby-static resolves through -L.
         # @type var resolved: Hash[String, Array[String]]
         resolved = Hash.new { |h, k| h[k] = [] }
+        # @type var outside: Array[String]
+        outside = []
         libs.each do |name|
           base = "lib#{name}.a"
           hit = dirs.find { |(_, d)| have.key?("#{d}/#{base}") }
           if hit
             resolved[hit[1]] << base
-          elsif sysroot_archives.nil?
-            notes << "-l#{name} resolves to nothing in the bundle; it can only be inferred to be the sysroot's (tools.wasi_sdk)"
-          elsif !sysroot_archives.include?(base)
-            out << Refusal.new("4.7", "-l#{name} resolves neither in the bundle nor in the sysroot")
+          else
+            outside << name
+            if sysroot_archives && !sysroot_archives.include?(base)
+              out << Refusal.new("4.7", "-l#{name} resolves neither in the bundle nor in the sysroot")
+            end
           end
+        end
+
+        if sysroot_libraries != outside
+          out << Refusal.new(
+            "4.12",
+            "sysroot_libraries is #{sysroot_libraries.inspect}; the -l names on the link " \
+            "recipe that resolve nowhere in the bundle are #{outside.inspect}"
+          )
         end
 
         want_build = (tree_words - ["main.o"]).map { |w| "build/#{w}" }
@@ -104,7 +111,7 @@ module RubyWasm
           out << Refusal.new("4.7", "#{p} is under lib/ and no -L root on the link recipe accounts for it")
         end
 
-        Result.new(out, notes)
+        Result.new(out)
       end
 
       def self.compare(clause, where, want, got, out)

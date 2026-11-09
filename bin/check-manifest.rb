@@ -96,14 +96,19 @@ keys.each do |name, k|
   end
 end
 
-# v3 2.1 and 4.7: build/ and each lib/<key>/ hold exactly what the link
-# recipe names. From the bundle alone, a -l resolving nowhere in it can only be
-# presumed the sysroot's, which is printed rather than passed silently.
+# v3 2.1, 4.7 and 4.12: build/, each lib/<key>/ and sysroot_libraries hold
+# exactly what the link recipe names.
 if listed && manifest.fetch("contract_version", 0).to_i >= 3
   link_line = File.readlines(File.join(dir, "link.raw.txt"), chomp: true).first.to_s
-  members = RubyWasm::ReleaseBundle::Members.check(link_line: link_line, path_keys: keys, listed: listed)
-  members.refusals.each { |r| stops << "#{r.clause} #{r.message}" }
-  members.notes.each { |n| puts "  presumed: #{n}" }
+  if manifest.key?("sysroot_libraries")
+    members = RubyWasm::ReleaseBundle::Members.check(
+      link_line: link_line, path_keys: keys, listed: listed,
+      sysroot_libraries: manifest["sysroot_libraries"]
+    )
+    members.refusals.each { |r| stops << "#{r.clause} #{r.message}" }
+  else
+    stops << "4.12 the manifest has no sysroot_libraries"
+  end
 end
 
 matched.each { |name, n| puts format("  %-14s %d", name, n) }

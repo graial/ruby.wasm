@@ -7,9 +7,8 @@ module RubyWasm
       end
 
       class Result < Struct[untyped]
-        def self.new: (Array[Refusal] refusals, Array[String] notes) -> Result
+        def self.new: (Array[Refusal] refusals) -> Result
         attr_accessor refusals: Array[Refusal]
-        attr_accessor notes: Array[String]
       end
 
       MEMBER: Regexp
@@ -19,6 +18,7 @@ module RubyWasm
         link_line: String,
         path_keys: Hash[String, Hash[String, untyped]],
         listed: Array[String],
+        sysroot_libraries: untyped,
         ?sysroot_archives: Array[String]?
       ) -> Result
 

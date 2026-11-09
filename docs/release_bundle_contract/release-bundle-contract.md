@@ -130,7 +130,8 @@ recipe is what its `build/` is checked against.
 archives that the line's `-l` words resolve to in that root, and nothing else:
 `lib/openssl_lib/` holds `libssl.a` and `libcrypto.a`, and no other file the
 root happens to contain. A `-l` that resolves in the wasi-sdk sysroot ships
-nowhere. The wasi-sdk accounts for it, and `tools.wasi_sdk` states which one.
+nowhere. The wasi-sdk accounts for it, `tools.wasi_sdk` states which one, and
+`sysroot_libraries` names it (4.12).
 
 Placement follows the Build tree's relative layout so that a reference recipe
 is readable against the bundle it ships with: a reader meeting
@@ -233,6 +234,9 @@ extensions:                      # [] where the line names dmyext.o
   - bigdecimal
   - cgi/escape
   # … 26 in all, in ext/extinit.c's order
+sysroot_libraries:               # the -l names resolved in the wasi-sdk sysroot
+  - m
+  # … in the link recipe's order
 
 tools:
   wasi_sdk: "22.0"
@@ -406,6 +410,15 @@ something the Build did not do.
 extractor and the checks that cut the bundle live on `release`, so a
 bundle's own provenance needs both. It requires a tracked-clean `release`
 checkout, for 4.3's reason.
+
+**4.12 `sysroot_libraries` lists the `-l` names the link recipe resolves in the
+wasi-sdk sysroot.** They are the names without their `-l`, in the recipe's
+order, with no name twice. The producer writes the list from what it found in
+the sysroot, and no human states it. It is exactly the `-l` names that resolve
+nowhere in the bundle, so a reader holding only the bundle can tell a sysroot
+library from an archive missing from `lib/<key>/`. It is a statement of what
+the producer resolved, and not a proof that a consumer's own sysroot holds
+those archives.
 
 ---
 
@@ -807,10 +820,9 @@ parsing a fetchable tag out of that line is interpreting, and should fail
 loudly rather than fetch the wrong Binaryen.
 
 **7.5 The member list is what the Build linked, not an instruction** — 3.3.
-Recheck `build/` and each `lib/<key>/` against `link.raw.txt` yourself: the
-rule is in 2.1, and a bundle holds everything it reads except the sysroot's
-listing. A `-l` that resolves nowhere in the bundle can only be presumed to be
-the sysroot's, from the bundle alone.
+Recheck `build/`, each `lib/<key>/` and `sysroot_libraries` against
+`link.raw.txt` yourself: the rules are in 2.1 and 4.12, and a bundle holds
+everything that check reads.
 
 **7.6 Both recipes are evidence, and neither carries a claim about
 applicability** — 5.2. The compile recipe's flags are CRuby's for CRuby's
@@ -872,8 +884,8 @@ table of four members was what one `minimal` Relink gave:
 v3 states the rule instead. Outside roots become derived root keys, with
 `lib/<key>/` holding exactly the resolved archives.
 
-**New manifest fields:** `release_commit` (4.11; ADR-0047) and `extensions`
-(4.10). The batch also listed a `tools.llvm_nm`. It is not added: the
+**New manifest fields:** `release_commit` (4.11; ADR-0047), `extensions`
+(4.10) and `sysroot_libraries` (4.12). The batch also listed a `tools.llvm_nm`. It is not added: the
 Capture's `llvm-nm` is the wasi-sdk's own and is pinned by refusal (4.1).
 
 **6.5 reads the wasi-sdk path from the compile recipe's second word.** v2

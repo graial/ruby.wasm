@@ -10,7 +10,6 @@ module RubyWasm
 
       attr_reader log: Array[String]
       attr_reader refusals: Array[untyped]
-      attr_reader notes: Array[String]
 
       @cap: String
       @input: Hash[String, untyped]

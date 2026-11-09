@@ -167,8 +167,26 @@ RSpec.describe RubyWasm::ReleaseBundle::CaptureRun do
       m = YAML.safe_load_file(File.join(bundle, "manifest.yml"))
       expect(m["contract_version"]).to eq(3)
       expect(m["extensions"]).to eq([])
+      expect(m["sysroot_libraries"]).to eq(JSON.parse(File.read(File.join(@dir, "cap/capture.json"))).fetch("sysroot"))
       expect(m["release_commit"]).to match(/\A\h{40}\z/)
       expect(m["transcript_cwd"]).to eq(tree)
+    end
+
+    it "has bin/check-manifest.rb accept the field, and stop on a bundle without it" do
+      skip "GNU make is not on PATH" unless system("make --version > /dev/null 2>&1")
+      asm = assemble
+      expect(asm.run).to be(true), asm.refusals.map(&:message).join("\n")
+      bundle = File.join(@dir, "bundle")
+      script = File.expand_path("../../../bin/check-manifest.rb", __dir__)
+      # This miniature satisfies 4.12 and not the path keys of 6.2-6.3, so the
+      # script's other stops are expected; 4.12 is the one being watched.
+      out, err, = Open3.capture3(RbConfig.ruby, script, bundle)
+      expect(out + err).not_to include("4.12")
+      manifest = File.join(bundle, "manifest.yml")
+      File.write(manifest, File.read(manifest).sub(/^sysroot_libraries:.*?(?=^\s*$)/m, ""))
+      out, err, st = Open3.capture3(RbConfig.ruby, script, bundle)
+      expect(st).not_to be_success
+      expect(out + err).to include("4.12 the manifest has no sysroot_libraries")
     end
 
     it "refuses an input that states a field the bundle derives" do

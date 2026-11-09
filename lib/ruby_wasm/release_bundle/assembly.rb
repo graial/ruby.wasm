@@ -25,7 +25,7 @@ module RubyWasm
       DECLARED_KEYS = %w[wasi_sdk_path ruby_src cc_wrapper wasi_vfs wasm_opt].freeze
       CONTRACT_VERSION = 3
 
-      attr_reader :log, :refusals, :notes
+      attr_reader :log, :refusals
 
       def initialize(capture_dir:, input:, dest:, release_checkout:)
         @cap = File.expand_path(capture_dir)
@@ -38,9 +38,6 @@ module RubyWasm
         # @type var refusals: Array[untyped]
         refusals = []
         @refusals = refusals
-        # @type var notes: Array[String]
-        notes = []
-        @notes = notes
       end
 
       def run
@@ -101,6 +98,7 @@ module RubyWasm
           "archive" => "prefix/lib/libruby-static.a",
           "transcript_cwd" => tree,
           "extensions" => meta.fetch("extensions"),
+          "sysroot_libraries" => meta.fetch("sysroot"),
           "tools" => @input.fetch("tools"),
           "path_keys" => path_keys
         }
@@ -116,10 +114,10 @@ module RubyWasm
         sysroot = File.readlines(File.join(@cap, "tables/sysroot.txt"), chomp: true).reject(&:empty?)
         result = Members.check(
           link_line: File.readlines(File.join(@dest, "link.raw.txt"), chomp: true).first.to_s,
-          path_keys: path_keys, listed: listed, sysroot_archives: sysroot
+          path_keys: path_keys, listed: listed,
+          sysroot_libraries: manifest.fetch("sysroot_libraries"), sysroot_archives: sysroot
         )
         @refusals.concat(result.refusals)
-        @notes.concat(result.notes)
         @log << "assembled    : #{@dest} (#{listed.length} hashed paths)"
         @refusals.empty?
       end
@@ -165,6 +163,8 @@ module RubyWasm
         end
         out << "extensions:#{m["extensions"].empty? ? " []" : ""}\n"
         m["extensions"].each { |e| out << "  - #{scalar.call(e)}\n" }
+        out << "sysroot_libraries:#{m["sysroot_libraries"].empty? ? " []" : ""}\n"
+        m["sysroot_libraries"].each { |e| out << "  - #{scalar.call(e)}\n" }
         out << "\ntools:\n"
         m["tools"].each { |k, v| out << "  #{k}: #{scalar.call(v)}\n" }
         out << "\npath_keys:\n"

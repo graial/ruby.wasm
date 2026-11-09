@@ -47,7 +47,6 @@ rescue RubyWasm::ReleaseBundle::Assembly::Stop, Errno::ENOENT, KeyError, JSON::P
 end
 
 asm.log.each { |l| puts l }
-asm.notes.each { |n| puts "note         : #{n}" }
 asm.refusals.each { |r| warn "STOP #{r.clause}  #{r.message}" }
 
 checks = [
