@@ -20,6 +20,8 @@ target :lib do
   library "logger"
   library "pathname"
   library "forwardable"
+  library "open3"
+  library "yaml"
 
   configure_code_diagnostics(D::Ruby.default)
 end

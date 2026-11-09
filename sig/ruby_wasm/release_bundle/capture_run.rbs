@@ -1,0 +1,35 @@
+module RubyWasm
+  module ReleaseBundle
+    class CaptureRun
+      class Stop < StandardError
+      end
+
+      HASHED: Regexp
+
+      attr_reader refusals: Array[untyped]
+      attr_reader notes: Array[String]
+      attr_reader log: Array[String]
+
+      @tree: String
+      @checkout: String
+      @cap: String
+      @input: Hash[String, untyped]
+      @copy: String
+      @before: Hash[String, String]?
+
+      def initialize: (tree: String, checkout: String, capture_dir: String, input: Hash[String, untyped]) -> void
+      def run: () -> bool
+
+      private
+
+      def body: () -> bool
+      def finish: (Hash[String, String] before, Array[untyped] found) ?{ () -> void } -> bool
+      def stop: (Array[untyped] found) -> bool
+      def say: (String text) -> void
+      def git: (*String args) -> String
+      def mtime: (String rel) -> Time?
+      def tree_hashes: () -> Hash[String, String]
+      def transcript: (String dir, String name, *String cmd) -> String
+    end
+  end
+end

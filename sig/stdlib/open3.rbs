@@ -1,0 +1,6 @@
+# The open3 signatures RBS ships declare popen3 but not capture3, which the
+# release-bundle capture and assembly use to keep each tool's stdout, stderr
+# and exit status apart.
+module Open3
+  def self.capture3: (*untyped, **untyped) -> [String, String, Process::Status]
+end

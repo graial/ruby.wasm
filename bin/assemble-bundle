@@ -1,0 +1,70 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+#
+# Assembles one Release Bundle tree under contract v3 from a capture, then runs
+# every check that reads the assembled tree.
+#
+#   bin/assemble-bundle <capture-dir> <manifest-input.yml> <bundle-dir>
+#
+# <capture-dir>        written by bin/capture-recipes
+# <manifest-input.yml> the same file the capture read: build_name, capture,
+#                      tools and the declared path_keys, and nothing derived
+# <bundle-dir>         must not exist (2.5); name it <tag-stem>/ where the
+#                      tarball is cut
+#
+# release_commit is this checkout's HEAD, which must be tracked-clean.
+#
+# Then, on the assembled tree:
+#   - members: build/ and lib/<key>/ exactly as the line names, with the
+#     producer's sysroot listing;
+#   - bin/check-manifest.rb: 6.2, 6.3, 6.4 and the bundle-only member check;
+#   - bin/check-config-agreement: 6.5.
+#
+# Exit 0 only if all of them pass. Exit 1 on refusals. Exit 2 when the
+# assembly could not be carried out; the partial tree is left for diagnosis
+# and is not a bundle.
+
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+require "open3"
+require "yaml"
+require "ruby_wasm/release_bundle/assembly"
+
+cap, input_path, dest = ARGV
+if [cap, input_path, dest].any?(&:nil?)
+  warn "usage: #{File.basename($PROGRAM_NAME)} <capture-dir> <manifest-input.yml> <bundle-dir>"
+  exit 2
+end
+
+release = File.expand_path("..", __dir__)
+begin
+  asm = RubyWasm::ReleaseBundle::Assembly.new(
+    capture_dir: cap, input: YAML.safe_load_file(input_path), dest: dest, release_checkout: release
+  )
+  ok = asm.run
+rescue RubyWasm::ReleaseBundle::Assembly::Stop, Errno::ENOENT, KeyError, JSON::ParserError => e
+  warn "STOP  #{e.message}"
+  exit 2
+end
+
+asm.log.each { |l| puts l }
+asm.notes.each { |n| puts "note         : #{n}" }
+asm.refusals.each { |r| warn "STOP #{r.clause}  #{r.message}" }
+
+checks = [
+  ["check-manifest", [RbConfig.ruby, File.join(__dir__, "check-manifest.rb"), dest]],
+  ["config-agreement", [RbConfig.ruby, File.join(__dir__, "check-config-agreement"), dest]]
+]
+failed = !ok
+checks.each do |name, cmd|
+  out, err, st = Open3.capture3(*cmd)
+  puts "---- #{name}: exit #{st.exitstatus}"
+  print out
+  warn err unless err.empty?
+  failed = true unless st.success?
+end
+
+if failed
+  warn "NOT A BUNDLE  #{File.expand_path(dest)} failed a check; do not tar or publish it"
+  exit 1
+end
+puts "OK  #{File.expand_path(dest)}"

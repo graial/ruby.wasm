@@ -12,6 +12,7 @@
 # bundle carries and nothing else.
 
 require "yaml"
+require_relative "../lib/ruby_wasm/release_bundle/members"
 
 dir = ARGV[0] or abort "usage: #{File.basename($PROGRAM_NAME)} <bundle-dir>"
 manifest = YAML.safe_load_file(File.join(dir, "manifest.yml"))
@@ -87,9 +88,22 @@ keys.each do |name, k|
     stops << "6.2 #{name}: no tools.#{field} in the manifest" unless manifest["tools"].key?(field)
   elsif listed.nil?
     deferred << "#{name} -> #{ref}"
+  elsif k["kind"] == "root" && ref == "lib/#{name}"
+    # v3: a directory reference, resolved exactly by the member check below.
+    next
   elsif !listed.include?(ref)
     stops << "6.2 #{name}: accounted member #{ref} is not in hashes.txt"
   end
+end
+
+# v3 2.1 and 4.7: build/ and each lib/<key>/ hold exactly what the link
+# recipe names. From the bundle alone, a -l resolving nowhere in it can only be
+# presumed the sysroot's, which is printed rather than passed silently.
+if listed && manifest.fetch("contract_version", 0).to_i >= 3
+  link_line = File.readlines(File.join(dir, "link.raw.txt"), chomp: true).first.to_s
+  members = RubyWasm::ReleaseBundle::Members.check(link_line: link_line, path_keys: keys, listed: listed)
+  members.refusals.each { |r| stops << "#{r.clause} #{r.message}" }
+  members.notes.each { |n| puts "  presumed: #{n}" }
 end
 
 matched.each { |name, n| puts format("  %-14s %d", name, n) }
