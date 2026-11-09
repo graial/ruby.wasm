@@ -28,13 +28,15 @@ module RubyWasm
         tree_exists: bool,
         ruby_mtime: Time?,
         main_o_mtime: Time?,
-        extinit_o_mtime: Time?,
-        checkout_changes: Array[String]
+        checkout_changes: Array[String],
+        ?copy_exists: bool
       ) -> Array[Refusal]
 
       def self.select: (
-        ruby_transcript: String,
-        main_transcript: String
+        link_transcript: String,
+        main_transcript: String,
+        ?copy_main_transcript: String?,
+        ?copy_path: String?
       ) -> Selection
 
       private

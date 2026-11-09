@@ -1,0 +1,30 @@
+module RubyWasm
+  module ReleaseBundle
+    module Members
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      class Result < Struct[untyped]
+        def self.new: (Array[Refusal] refusals, Array[String] notes) -> Result
+        attr_accessor refusals: Array[Refusal]
+        attr_accessor notes: Array[String]
+      end
+
+      MEMBER: Regexp
+      TAKES_ARGUMENT: Array[String]
+
+      def self.check: (
+        link_line: String,
+        path_keys: Hash[String, Hash[String, untyped]],
+        listed: Array[String],
+        ?sysroot_archives: Array[String]?
+      ) -> Result
+
+      private
+
+      def self.compare: (String clause, String where, Array[String] want, Array[String] got, Array[Refusal] out) -> void
+    end
+  end
+end

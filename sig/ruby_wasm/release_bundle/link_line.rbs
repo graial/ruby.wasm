@@ -1,0 +1,65 @@
+module RubyWasm
+  module ReleaseBundle
+    module LinkLine
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      class Word < Struct[untyped]
+        def self.new: (Integer index, String text, Symbol kind, String? file) -> Word
+        attr_accessor index: Integer
+        attr_accessor text: String
+        attr_accessor kind: Symbol
+        attr_accessor file: String?
+      end
+
+      class Classification < Struct[untyped]
+        def self.new: (
+          Array[Word] words,
+          Array[String] build_members,
+          Hash[String, Hash[String, untyped]] root_keys,
+          Array[String] inputs,
+          Array[String] ext_archives,
+          Array[String] sysroot,
+          String? wasi_sdk_path,
+          Array[Refusal] refusals
+        ) -> Classification
+        attr_accessor words: Array[Word]
+        attr_accessor build_members: Array[String]
+        attr_accessor root_keys: Hash[String, Hash[String, untyped]]
+        attr_accessor inputs: Array[String]
+        attr_accessor ext_archives: Array[String]
+        attr_accessor sysroot: Array[String]
+        attr_accessor wasi_sdk_path: String?
+        attr_accessor refusals: Array[Refusal]
+      end
+
+      TAKES_ARGUMENT: Array[String]
+      COMPILER: Regexp
+      ROOT: Regexp
+      VERSIONED: Regexp
+      MEMBER: Regexp
+
+      def self.classify: (
+        line: String,
+        tree_files: Array[String],
+        token_keys: Hash[String, String],
+        root_listings: Hash[String, Array[String]],
+        sysroot_archives: Array[String],
+        ?existing_keys: Array[String]
+      ) -> Classification
+
+      def self.root_key_name: (String root) -> String?
+
+      private
+
+      def self.root_keys_for: (
+        Array[String] roots,
+        Hash[String, Array[String]] resolved_by,
+        Array[String] existing_keys,
+        Array[Refusal] out
+      ) -> Hash[String, Hash[String, untyped]]
+    end
+  end
+end

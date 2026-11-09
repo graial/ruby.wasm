@@ -137,6 +137,19 @@ RSpec.describe RubyWasm::ReleaseBundle::ConfigAgreement do
       expect(messages(recipe: recipe).join).to include("/bin/clang")
     end
 
+    it "takes the path from the second word only: a clang as the first word is refused" do
+      words = RECIPE.split(" ")
+      swapped = ([words[1], words[0]] + words[2..]).join(" ")
+      expect(messages(recipe: swapped).join).to include("second word")
+    end
+
+    it "accepts the real v3 compile recipes' second word" do
+      %w[minimal full].each do |p|
+        line = File.binread(File.expand_path("../../fixtures/v3/#{p}/tree.main-n.out", __dir__)).lines.grep(/-o main\.o /).first
+        expect(line.split(" ")[1]).to eq("/home/shared/external/ladder/main/build/toolchain/wasi-sdk-22.0/bin/clang")
+      end
+    end
+
     it "refuses a recipe naming two such compilers" do
       recipe = RECIPE.sub(" -o main.o", " /opt/sdk/bin/clang -o main.o")
       expect(messages(recipe: recipe).join).to include("/bin/clang")

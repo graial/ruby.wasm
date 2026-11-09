@@ -12,8 +12,8 @@ module RubyWasm
     #   - The three WASM_*_STACK_BUFFER_SIZE defines on the compile recipe each
     #     appear in CONFIG["configure_args"].
     #   - The wasi-sdk path appears in CONFIG["configure_args"], as the word
-    #     WASI_SDK_PATH=<path>. The path is the compile recipe's compiler word,
-    #     <path>/bin/clang, with /bin/clang removed.
+    #     WASI_SDK_PATH=<path>. The path is the compile recipe's second word,
+    #     which must be <path>/bin/clang, with /bin/clang removed.
     #
     # Every value is read from the capture and looked for in the one key that
     # carries it, never in another key that happens to contain it. That is
@@ -198,17 +198,27 @@ module RubyWasm
         values.map { |name, vs| "-D#{name}=#{vs.first}" }
       end
 
-      # The wasi-sdk path: the one recipe word that is <path>/bin/clang.
+      # The wasi-sdk path: the compile recipe's second word, which must be
+      # <path>/bin/clang (v3 6.5). The first word is the wrapper. A
+      # <path>/bin/clang anywhere else is a second compiler and also stops.
       def wasi_sdk_path(words, out)
-        compilers = words.select { |w| COMPILER.match?(w) }.uniq
-        if compilers.size != 1
+        second = words[1].to_s
+        m = COMPILER.match(second)
+        if m.nil?
           out << refusal(
-            "the compile recipe should name one compiler <wasi-sdk>/bin/clang; " \
-            "found #{compilers.size}: #{compilers.inspect}"
+            "the compile recipe's second word should be <wasi-sdk>/bin/clang; it is #{second.inspect}"
           )
           return nil
         end
-        COMPILER.match(compilers.first.to_s)&.[](:sdk)
+        others = words.each_with_index.select { |w, i| i != 1 && COMPILER.match?(w) }.map(&:first)
+        unless others.empty?
+          out << refusal(
+            "the compile recipe should name one compiler <wasi-sdk>/bin/clang, as its second word; " \
+            "found #{others.length} more: #{others.inspect}"
+          )
+          return nil
+        end
+        m[:sdk]
       end
 
       # configure_args' shell words, and the whitespace-separated words of

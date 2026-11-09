@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "ruby_wasm/release_bundle/capture"
+require_relative "v3_fixtures"
 
 RSpec.describe RubyWasm::ReleaseBundle::Capture do
   # Shaped like the real transcripts: the link recipe, then the wasm-opt line
@@ -15,7 +16,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Capture do
   let(:main_transcript) { "echo compiling main.c\n#{compile}\n" }
 
   def selection(ruby: ruby_transcript, main: main_transcript)
-    described_class.select(ruby_transcript: ruby, main_transcript: main)
+    described_class.select(link_transcript: ruby, main_transcript: main)
   end
 
   def clauses(**kw)
@@ -112,7 +113,7 @@ RSpec.describe RubyWasm::ReleaseBundle::Capture do
     expect(clauses(ruby: "#{wasm_opt}\n#{link}\n", main: "")).to eq(%w[6.1 5.1])
   end
 
-  describe "6.0 — preconditions on the Build tree" do
+  describe "6.0 — preconditions on the Build tree, before the copy" do
     let(:t) { Time.at(1_000_000) }
 
     def pre(**overrides)
@@ -121,14 +122,18 @@ RSpec.describe RubyWasm::ReleaseBundle::Capture do
           tree_exists: true,
           ruby_mtime: t + 120,
           main_o_mtime: t,
-          extinit_o_mtime: t + 60,
-          checkout_changes: []
+          checkout_changes: [],
+          copy_exists: false
         }.merge(overrides)
       ).map(&:clause)
     end
 
-    it "passes a completed tree over a clean checkout" do
+    it "passes a linked tree over a clean checkout" do
       expect(pre).to be_empty
+    end
+
+    it "does not require ext/extinit.o: minimal's own link names dmyext.o (ADR-0068, F2)" do
+      expect(described_class.method(:preconditions).parameters.map(&:last)).not_to include(:extinit_o_mtime)
     end
 
     it "stops on a tree that does not exist, and reports nothing else about it" do
@@ -143,16 +148,12 @@ RSpec.describe RubyWasm::ReleaseBundle::Capture do
       expect(pre(main_o_mtime: nil)).to eq(["6.0"])
     end
 
-    it "stops when ext/extinit.o is absent, which is the build driver's success without make ruby" do
-      expect(pre(extinit_o_mtime: nil)).to eq(["6.0"])
-    end
-
     it "stops when ruby is not newer than main.o" do
       expect(pre(main_o_mtime: t + 120)).to eq(["6.0"])
     end
 
-    it "stops when ruby is not newer than ext/extinit.o" do
-      expect(pre(extinit_o_mtime: t + 300)).to eq(["6.0"])
+    it "stops when the Capture copy's path is already taken" do
+      expect(pre(copy_exists: true)).to eq(["6.1"])
     end
 
     it "stops on a checkout with a tracked modification" do
@@ -160,7 +161,65 @@ RSpec.describe RubyWasm::ReleaseBundle::Capture do
     end
 
     it "reports every independent refusal at once" do
-      expect(pre(extinit_o_mtime: nil, checkout_changes: [" M x"])).to eq(%w[6.0 4.3])
+      expect(pre(main_o_mtime: nil, checkout_changes: [" M x"])).to eq(%w[6.0 4.3])
+    end
+  end
+
+  describe "v3 — the real transcripts" do
+    %w[minimal full].each do |p|
+      it "#{p}: selects one link line and its wasm-opt line from build-ext, taken in the copy" do
+        s = V3Fixtures.selection(p)
+        expect(s.refusals).to be_empty
+        expect(s.link_raw.to_s.lines.length).to eq(2)
+        expect(s.link_raw.to_s.lines.first).to end_with("-o ruby\n")
+        expect(s.link_raw.to_s.lines.last).to start_with(V3Fixtures::WASM_OPT + " ")
+        expect(s.notes.join).to include("immediately follows")
+      end
+
+      it "#{p}: the copy's compile recipe is the tree's, byte for byte" do
+        expect(V3Fixtures.read(p, "copy.main-n.out")).to eq(V3Fixtures.read(p, "tree.main-n.out"))
+      end
+    end
+
+    it "takes the compile recipe from the real tree" do
+      s = V3Fixtures.selection("full")
+      line = V3Fixtures.read("full", "tree.main-n.out").lines.grep(/-o main\.o /).first
+      expect(s.compile_raw).to eq(line)
+    end
+
+    it "minimal's link line names dmyext.o and the enc/ objects, not ext/extinit.o" do
+      line = V3Fixtures.link_line("minimal").split(" ")
+      expect(line).to include("dmyext.o", "enc/encinit.o", "enc/libenc.a", "enc/libtrans.a")
+      expect(line).not_to include("ext/extinit.o")
+    end
+
+    it "refuses a copy whose compile recipe differs from the tree's" do
+      tree = V3Fixtures.read("full", "tree.main-n.out")
+      s = described_class.select(
+        link_transcript: V3Fixtures.read("full", "copy.build-ext-n.out"),
+        main_transcript: tree,
+        copy_main_transcript: tree.sub("-O3", "-O2")
+      )
+      expect(s.refusals.map(&:message).join).to include("not faithful")
+    end
+
+    it "refuses a selected recipe that names the Capture copy's path" do
+      copy = "/home/shared/external/ladder/main/build/wasm32-unknown-icp/ruby-3.3-wasm32-unknown-icp-full.capture-copy"
+      transcript = V3Fixtures.read("full", "copy.build-ext-n.out").sub(/ main\.o /, " #{copy}/main.o ")
+      s = described_class.select(
+        link_transcript: transcript,
+        main_transcript: V3Fixtures.read("full", "tree.main-n.out"),
+        copy_path: copy
+      )
+      expect(s.refusals.map(&:clause)).to eq(["4.6"])
+    end
+
+    it "accepts the real transcript, which names the copy only in make's own Entering lines" do
+      copy = "/home/shared/external/ladder/main/build/wasm32-unknown-icp/ruby-3.3-wasm32-unknown-icp-full.capture-copy"
+      transcript = V3Fixtures.read("full", "copy.build-ext-n.out")
+      expect(transcript).to include(copy)
+      s = described_class.select(link_transcript: transcript, main_transcript: V3Fixtures.read("full", "tree.main-n.out"), copy_path: copy)
+      expect(s.refusals).to be_empty
     end
   end
 end

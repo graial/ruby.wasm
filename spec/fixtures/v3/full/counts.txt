@@ -1,0 +1,6 @@
+link lines (-o ruby$)       1
+wasm-opt lines              1
+compile lines copy / tree   1 / 1
+compile transcripts         byte-identical
+present     ext/extinit.c
+present     exts.mk

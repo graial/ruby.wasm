@@ -3,10 +3,12 @@
 module RubyWasm
   module ReleaseBundle
     # Whether a Build tree may be captured (contract 6.0), and which lines of its
-    # `make -n` transcripts are the Reference recipes (6.1, 5.1).
+    # `make -n` transcripts are the Reference recipes (6.1, 5.1). From v3 the
+    # link recipe comes from `make -n build-ext` in a Capture copy, never the
+    # tree (ADR-0068); LinkLine and Agreement then read what it names.
     #
     # Pure, for the reason Preflight is. bin/capture-recipes gathers the facts —
-    # three mtimes, the checkout's `git status`, two transcripts — and this
+    # mtimes, the checkout's `git status`, three transcripts — and this
     # decides. Every refusal is therefore reachable from a spec without a Build
     # tree or a `make`, and a capture whose refusals are untested is a capture
     # nobody has seen stop.
@@ -32,7 +34,13 @@ module RubyWasm
       WASM_OPT = %r{bin/wasm-opt }
       COMPILE = /-o main\.o /
 
-      # 6.0, including its third bullet: the checkout is tracked-clean per 4.3.
+      # 6.0, first step, before the Capture copy is made: the tree is as the
+      # Build left it, with a linked ruby and a main.o, the checkout is
+      # tracked-clean per 4.3, and the copy's path is free. Freshness against
+      # the line is the second step (Agreement.freshness), once there is a line.
+      #
+      # There is no `make` step and no ext/extinit.o requirement: v2's
+      # `make ruby` was a Relink (ADR-0068, F1 and F2).
       #
       # mtimes are nil when the file is absent. checkout_changes is the output
       # of `git status --porcelain --untracked-files=no`, one entry per line.
@@ -40,8 +48,8 @@ module RubyWasm
         tree_exists:,
         ruby_mtime:,
         main_o_mtime:,
-        extinit_o_mtime:,
-        checkout_changes:
+        checkout_changes:,
+        copy_exists: false
       )
         # @type var out: Array[Refusal]
         out = []
@@ -52,27 +60,21 @@ module RubyWasm
         end
 
         if ruby_mtime.nil?
-          out << Refusal.new(
-            "6.0",
-            "ruby is absent: no completed link, and a printed recipe is not a completed link"
-          )
+          out << Refusal.new("6.0", "ruby is absent: the Build did not link")
         end
         if main_o_mtime.nil?
           out << Refusal.new("6.0", "main.o is absent")
         end
-        if extinit_o_mtime.nil?
-          out << Refusal.new(
-            "6.0",
-            "ext/extinit.o is absent. It is generated at link time, so `make ruby` " \
-            "has not completed. The build driver reports success before it has."
-          )
-        end
-
         if ruby_mtime && main_o_mtime && !(ruby_mtime > main_o_mtime)
           out << Refusal.new("6.0", "ruby is not newer than main.o")
         end
-        if ruby_mtime && extinit_o_mtime && !(ruby_mtime > extinit_o_mtime)
-          out << Refusal.new("6.0", "ruby is not newer than ext/extinit.o")
+
+        if copy_exists
+          out << Refusal.new(
+            "6.1",
+            "the Capture copy's path already exists; a copy from an earlier attempt " \
+            "is not a copy of this tree"
+          )
         end
 
         unless checkout_changes.empty?
@@ -87,21 +89,37 @@ module RubyWasm
         out
       end
 
-      # 6.1 and 5.1. ruby_transcript is `make -n ruby`; main_transcript is
-      # `make -n -W main.c main.o`. Each is one invocation's whole stdout, and
-      # counting and selecting both read it — never a second invocation.
-      def self.select(ruby_transcript:, main_transcript:)
+      # 6.1 and 5.1. link_transcript is `make -n build-ext`, run in the Capture
+      # copy. main_transcript is `make -n -W main.c main.o` in the real tree,
+      # and copy_main_transcript the same command in the copy. Each is one
+      # invocation's whole stdout, and counting and selecting both read it.
+      #
+      # copy_path, when given, must appear in neither selected recipe: a line
+      # that names the copy describes a tree deleted afterwards.
+      def self.select(link_transcript:, main_transcript:, copy_main_transcript: nil, copy_path: nil)
         # @type var refusals: Array[Refusal]
         refusals = []
         # @type var notes: Array[String]
         notes = []
 
-        ruby_lines = physical_lines(ruby_transcript)
+        link_lines = physical_lines(link_transcript)
         main_lines = physical_lines(main_transcript)
 
-        link = pick(ruby_lines, LINK, "link recipe", "make -n ruby", refusals)
-        wasm_opt = pick(ruby_lines, WASM_OPT, "wasm-opt line", "make -n ruby", refusals)
+        link = pick(link_lines, LINK, "link recipe", "make -n build-ext", refusals)
+        wasm_opt = pick(link_lines, WASM_OPT, "wasm-opt line", "make -n build-ext", refusals)
         compile = pick(main_lines, COMPILE, "compile recipe", "make -n -W main.c main.o", refusals)
+
+        # Copy fidelity: the copy's compile recipe is the tree's, byte for byte.
+        if copy_main_transcript
+          copy_compile = pick(physical_lines(copy_main_transcript), COMPILE, "copy's compile recipe",
+                              "make -n -W main.c main.o (copy)", refusals)
+          if compile && copy_compile && compile.last != copy_compile.last
+            refusals << Refusal.new(
+              "6.1",
+              "the Capture copy's compile recipe differs from the Build tree's; the copy is not faithful"
+            )
+          end
+        end
 
         # 5.1: the wasm-opt line *after* the link recipe. The file is written in
         # the link-then-wasm-opt order, so that order has to be the transcript's
@@ -126,6 +144,17 @@ module RubyWasm
                 "the wasm-opt line (#{opt_at + 1}) follows the link recipe (#{link_at + 1}) " \
                 "with #{gap - 1} line(s) between them"
               end
+            )
+          end
+        end
+
+        if copy_path && !copy_path.empty?
+          { "link recipe" => link, "wasm-opt line" => wasm_opt, "compile recipe" => compile }.each do |label, hit|
+            next unless hit && hit[1].include?(copy_path)
+            refusals << Refusal.new(
+              "4.6",
+              "the #{label} names the Capture copy's path #{copy_path}; " \
+              "the line depends on where the copy sits"
             )
           end
         end

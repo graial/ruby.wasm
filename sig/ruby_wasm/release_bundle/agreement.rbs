@@ -1,0 +1,37 @@
+module RubyWasm
+  module ReleaseBundle
+    module Agreement
+      class Refusal < Struct[untyped]
+        attr_accessor clause: String
+        attr_accessor message: String
+      end
+
+      class Result < Struct[untyped]
+        def self.new: (Array[String] extensions, Array[Refusal] refusals) -> Result
+        attr_accessor extensions: Array[String]
+        attr_accessor refusals: Array[Refusal]
+      end
+
+      NM_LINE: Regexp
+      MAP_LINE: Regexp
+      INIT_CALL: Regexp
+      WEAK_OR_ANY: Regexp
+
+      def self.parse_nm: (String text) -> Array[[String, String]]
+      def self.parse_function_map: (String text) -> Array[String]
+      def self.parse_extinit: (String text) -> Array[[String, String]]
+
+      def self.check: (
+        inputs: Array[String],
+        ext_archives: Array[String],
+        words: Array[LinkLine::Word],
+        symbols: Hash[String, Array[[String, String]]],
+        function_map: Array[String],
+        extinit_c: String?
+      ) -> Result
+
+      def self.freshness: (ruby_mtime: Time?, mtimes: Hash[String, Time?]) -> Array[Refusal]
+      def self.untouched: (before: Hash[String, String], after: Hash[String, String]) -> Array[Refusal]
+    end
+  end
+end

@@ -1,0 +1,7 @@
+clone       /home/shared/external/ladder/main
+HEAD        c1f2061863135008871e44a22372e6a7246991d1
+HEAD^{tree} 79884773c810891cea9e1863cb4005fd63cbb4f1
+llvm-nm     /home/shared/external/ladder/main/build/toolchain/wasi-sdk-22.0/bin/llvm-nm
+llvm-nm -v    LLVM version 18.1.2
+make        GNU Make 4.4.1
+date (UTC)  2026-11-08T21:26:48Z
